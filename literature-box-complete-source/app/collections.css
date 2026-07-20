@@ -1,0 +1,6 @@
+.collections{max-width:1400px;margin:24px auto 0;padding:0 5vw;display:flex;gap:10px}
+.collections button{min-width:145px;border:0;border-bottom:2px solid transparent;background:transparent;padding:10px 14px;color:#746959;font:15px Georgia,serif;cursor:pointer}
+.collections button.active{border-bottom-color:#764831;color:#302820;font-weight:bold}
+.collections em{margin-left:8px;font:10px Arial,sans-serif;font-style:normal;background:#d2c6b4;border-radius:10px;padding:3px 6px}
+.collections button.active em{background:#7b4d36;color:white}
+@media(max-width:620px){.collections{margin-top:12px;padding-inline:10px}.collections button{min-width:0;flex:1;padding-inline:5px}.collections em{display:none}}
