@@ -1,4 +1,4 @@
-# The Literature Box
+# The Literature Box - built by GPT
 
 The Literature Box is a private, local-first desktop app for organizing literature notes as a tactile stack of index cards.
 
