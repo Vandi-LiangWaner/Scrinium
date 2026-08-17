@@ -20,3 +20,20 @@
 .attachments{position:relative;margin:18px 0 8px;padding:13px;border:1px dashed #b6a88e;background:#eee3cd55}.attachment-head{display:flex;align-items:center;justify-content:space-between;font:9px Arial,sans-serif;text-transform:uppercase;letter-spacing:.1em;color:#796d5a}.attach-button{margin:0!important;border:1px solid #aa9b82;background:#f7edd9;padding:7px 10px;cursor:pointer}.attach-button input{display:none}.attachment-empty{margin:13px 0 2px;color:#897d6b;font-size:12px;font-style:italic}.image-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}.image-grid figure{position:relative;margin:0;background:#e2d4bb;border:1px solid #c2b293}.image-grid img{display:block;width:100%;height:125px;object-fit:cover}.image-grid figcaption{padding:6px 8px;font:10px Arial,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.image-grid figure button{position:absolute;right:5px;top:5px;width:23px;height:23px;border:0;border-radius:50%;background:#30271fcc;color:white;cursor:pointer}.card-thumb{position:absolute;right:48px;bottom:50px;width:105px;height:74px;object-fit:cover;border:5px solid #f7edd9;box-shadow:1px 3px 6px #37291c55;transform:rotate(2deg)}
 @media(max-width:620px){.image-grid{grid-template-columns:repeat(2,1fr)}.card-thumb{width:76px;height:56px;right:25px}}
 .tag-search{position:relative;font:12px Arial,sans-serif}.tag-search summary{list-style:none;cursor:pointer;border:1px solid #bfb4a1;background:#f8f3e9;border-radius:5px;padding:11px 13px;white-space:nowrap}.tag-search>div{position:absolute;z-index:30;top:43px;left:0;width:220px;max-height:280px;overflow:auto;padding:5px;background:#fff9ed;border:1px solid #b8ad9a;box-shadow:0 8px 20px #44301f33}.tag-search button{display:flex;justify-content:space-between;width:100%;border:0;background:transparent;padding:8px 9px;text-align:left;cursor:pointer;color:#4d4438}.tag-search button:hover{background:#eadfc9}.tag-search em{font-style:normal;color:#968977}.tags button{font:10px Arial,sans-serif;text-transform:uppercase;letter-spacing:.06em;border:1px solid #bcae92;border-radius:3px;padding:5px 7px;background:#ece0c9;cursor:pointer;color:inherit}.tags button:hover{background:#ddceb2}
+
+/* One restrained scrollbar treatment everywhere, including menus and expanded cards. */
+*{scrollbar-width:thin;scrollbar-color:#9b8068 transparent}
+*::-webkit-scrollbar{width:9px;height:9px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:#9b8068;border:2px solid transparent;border-radius:999px;background-clip:padding-box}
+*::-webkit-scrollbar-thumb:hover{background:#795943;background-clip:padding-box}
+.value-tabs{scrollbar-width:thin!important}
+.value-tabs::-webkit-scrollbar{display:block!important;height:8px}
+.double-underline,.double-underline-tool{text-decoration-line:underline;text-decoration-style:double;text-decoration-color:#111;text-underline-offset:2px}
+.double-underline-tool{font-weight:600;min-width:29px}
+.duplicate-filter{border:1px solid #bfb4a1;background:#f8f3e9;border-radius:5px;padding:10px 11px;color:#574b3d;cursor:pointer;white-space:nowrap}
+.duplicate-filter em{margin-left:5px;padding:2px 6px;border-radius:10px;background:#ded2bd;font-style:normal;font-size:10px}
+.duplicate-filter.active{background:#76503b;color:#fff;border-color:#60402f}.duplicate-filter.active em{background:#f3e6d0;color:#5d4434}
+.duplicate-mark{position:absolute;z-index:7;top:43px;right:55px;padding:3px 7px;border:1px solid #b58f76;border-radius:10px;background:#f4e5d0;color:#80513e;font:8px Arial,sans-serif;text-transform:uppercase;letter-spacing:.07em}
+.paper-card .status-dot{display:inline-block;max-width:calc(100% - 210px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
+.rich-editor p,.rich-editor div{margin:.3em 0}.rich-editor p:has(>br:only-child),.rich-editor div:has(>br:only-child){min-height:1.25em;margin:0}.rich-preview p:has(>br:only-child),.rich-preview div:has(>br:only-child){min-height:1.25em;margin:0}
