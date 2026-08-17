@@ -37,3 +37,5 @@
 .duplicate-mark{position:absolute;z-index:7;top:43px;right:55px;padding:3px 7px;border:1px solid #b58f76;border-radius:10px;background:#f4e5d0;color:#80513e;font:8px Arial,sans-serif;text-transform:uppercase;letter-spacing:.07em}
 .paper-card .status-dot{display:inline-block;max-width:calc(100% - 210px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
 .rich-editor p,.rich-editor div{margin:.3em 0}.rich-editor p:has(>br:only-child),.rich-editor div:has(>br:only-child){min-height:1.25em;margin:0}.rich-preview p:has(>br:only-child),.rich-preview div:has(>br:only-child){min-height:1.25em;margin:0}
+
+.deck-card{animation:deal-smooth .28s cubic-bezier(.2,.72,.24,1);will-change:transform,opacity;backface-visibility:hidden}.deck-shadow{transition:transform .28s cubic-bezier(.2,.72,.24,1),box-shadow .28s ease}@keyframes deal-smooth{0%{opacity:.15;transform:translate3d(34px,5px,0) rotate(.7deg) scale(.992)}100%{opacity:1;transform:translate3d(0,0,0) rotate(0) scale(1)}}@media(prefers-reduced-motion:reduce){.deck-card{animation:none}.deck-shadow{transition:none}}

@@ -146,24 +146,39 @@ function ProjectField({values,onChange,suggestions=[]}:{values:string[];onChange
 }
 
 type TopicNode={name:string;path:string[];children:TopicNode[]};
+type TopicDropPlacement="before"|"inside"|"after";
 function buildTopicTree(paths:string[][],customOrder:string[]){
   const roots:TopicNode[]=[];
   paths.forEach(path=>{let level=roots;path.slice(0,5).forEach((name,index)=>{let node=level.find(item=>item.name===name);if(!node){node={name,path:path.slice(0,index+1),children:[]};level.push(node)}level=node.children})});
   const order=new Map(customOrder.map((key,index)=>[key.toLowerCase(),index]));
   const sort=(nodes:TopicNode[])=>nodes.sort((a,b)=>(order.get(a.path.join(" > ").toLowerCase())??Number.MAX_SAFE_INTEGER)-(order.get(b.path.join(" > ").toLowerCase())??Number.MAX_SAFE_INTEGER)||a.name.localeCompare(b.name)).forEach(node=>sort(node.children));sort(roots);return roots;
 }
-function TopicNavigation({paths,selected,onSelect,onEdit,onDropCard,onReorder,onRename,customOrder,count,total,unfiledCount,showUnfiled,onSelectUnfiled}:{paths:string[][];selected:string[];onSelect:(path:string[])=>void;onEdit:()=>void;onDropCard:(id:number,path:string[])=>void;onReorder:(source:string[],target:string[])=>void;onRename:(path:string[],name:string)=>void;customOrder:string[];count:(path:string[])=>number;total:number;unfiledCount:number;showUnfiled:boolean;onSelectUnfiled:()=>void}){
+function TopicNavigation({paths,selected,onSelect,onEdit,onDropCard,onReorder,onRename,customOrder,count,total,unfiledCount,showUnfiled,onSelectUnfiled}:{paths:string[][];selected:string[];onSelect:(path:string[])=>void;onEdit:()=>void;onDropCard:(id:number,path:string[])=>void;onReorder:(source:string[],target:string[],placement:TopicDropPlacement)=>void;onRename:(path:string[],name:string)=>void;customOrder:string[];count:(path:string[])=>number;total:number;unfiledCount:number;showUnfiled:boolean;onSelectUnfiled:()=>void}){
   const [search,setSearch]=useState("");
   const [expanded,setExpanded]=useState<Set<string>>(()=>new Set());
   const [renaming,setRenaming]=useState<string|null>(null);
   const [renameDraft,setRenameDraft]=useState("");
+  const [dropTarget,setDropTarget]=useState<{key:string;placement:TopicDropPlacement}|null>(null);
   useEffect(()=>{setExpanded(current=>{const next=new Set(current);selected.forEach((_,i)=>next.add(selected.slice(0,i+1).join(" > ")));return next})},[selected]);
   const tree=useMemo(()=>buildTopicTree(paths,customOrder),[paths,customOrder]);
   const needle=search.trim().toLowerCase();
   const includesMatch=(node:TopicNode):boolean=>node.name.toLowerCase().includes(needle)||node.children.some(includesMatch);
   const toggle=(key:string)=>setExpanded(current=>{const next=new Set(current);next.has(key)?next.delete(key):next.add(key);return next});
   const finishRename=(node:TopicNode)=>{const name=renameDraft.trim();if(name&&name!==node.name)onRename(node.path,name);setRenaming(null)};
-  const render=(nodes:TopicNode[]):ReactNode=>nodes.filter(node=>!needle||includesMatch(node)).map(node=>{const key=node.path.join(" > "),open=needle?includesMatch(node):expanded.has(key),active=key===selected.join(" > "),editing=renaming===key;return <li key={key}><div className={active?"topic-tree-row active":"topic-tree-row"} style={{paddingLeft:`${(node.path.length-1)*17}px`}} draggable={!editing&&!needle} onDragStart={e=>{e.stopPropagation();e.dataTransfer.effectAllowed="move";e.dataTransfer.setData("application/x-literature-topic-path",JSON.stringify(node.path))}} onDragOver={e=>{if(e.dataTransfer.types.includes("application/x-literature-topic-path")||e.dataTransfer.types.includes("text/plain"))e.preventDefault()}} onDrop={e=>{e.preventDefault();const source=e.dataTransfer.getData("application/x-literature-topic-path");if(source){try{onReorder(JSON.parse(source),node.path)}catch{}return}const id=Number(e.dataTransfer.getData("text/plain"));if(id)onDropCard(id,node.path)}}>{node.children.length?<button className="topic-disclosure" aria-label={open?`Collapse ${node.name}`:`Expand ${node.name}`} onClick={()=>toggle(key)}>{open?"▾":"▸"}</button>:<span className="topic-leaf"/>}{editing?<input className="topic-rename-input" autoFocus value={renameDraft} onChange={e=>setRenameDraft(e.target.value)} onBlur={()=>finishRename(node)} onKeyDown={e=>{if(e.key==="Enter")finishRename(node);if(e.key==="Escape")setRenaming(null)}}/>:<button className="topic-name" title={node.name} onClick={()=>onSelect(node.path)}>{node.name}</button>}<em className="topic-tree-count">{count(node.path)}</em>{!editing&&<button className="topic-rename" title={`Rename ${node.name}`} aria-label={`Rename ${node.name}`} onClick={()=>{setRenaming(key);setRenameDraft(node.name)}}>✎</button>}<span className="topic-drag" title="Drag to reorder">⋮⋮</span></div>{node.children.length>0&&open&&<ul>{render(node.children)}</ul>}</li>});
+  const placementFor=(event:React.DragEvent<HTMLDivElement>):TopicDropPlacement=>{const box=event.currentTarget.getBoundingClientRect(),ratio=(event.clientY-box.top)/Math.max(1,box.height);return ratio<.25?"before":ratio>.75?"after":"inside"};
+  const render=(nodes:TopicNode[]):ReactNode=>nodes.filter(node=>!needle||includesMatch(node)).map(node=>{
+    const key=node.path.join(" > "),open=needle?includesMatch(node):expanded.has(key),active=key===selected.join(" > "),editing=renaming===key,drop=dropTarget?.key===key?` topic-drop-${dropTarget.placement}`:"";
+    return <li key={key}><div className={`${active?"topic-tree-row active":"topic-tree-row"}${drop}`} style={{paddingLeft:`${(node.path.length-1)*17}px`}} draggable={!editing&&!needle}
+      onDragStart={e=>{e.stopPropagation();e.dataTransfer.effectAllowed="move";e.dataTransfer.setData("application/x-literature-topic-path",JSON.stringify(node.path));e.dataTransfer.setData("text/plain",JSON.stringify(node.path))}}
+      onDragEnd={()=>setDropTarget(null)}
+      onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node|null))setDropTarget(current=>current?.key===key?null:current)}}
+      onDragOver={e=>{if(!e.dataTransfer.types.includes("application/x-literature-topic-path")&&!e.dataTransfer.types.includes("text/plain"))return;e.preventDefault();e.stopPropagation();const placement=placementFor(e);e.dataTransfer.dropEffect="move";setDropTarget(current=>current?.key===key&&current.placement===placement?current:{key,placement})}}
+      onDrop={e=>{e.preventDefault();e.stopPropagation();const source=e.dataTransfer.getData("application/x-literature-topic-path"),placement=placementFor(e);setDropTarget(null);if(source){try{const sourcePath=JSON.parse(source) as string[];onReorder(sourcePath,node.path,placement);if(placement==="inside")setExpanded(current=>new Set(current).add(key))}catch{}return}const id=Number(e.dataTransfer.getData("text/plain"));if(id)onDropCard(id,node.path)}}>
+      {node.children.length?<button className="topic-disclosure" aria-label={open?`Collapse ${node.name}`:`Expand ${node.name}`} onClick={()=>toggle(key)}>{open?"▾":"▸"}</button>:<span className="topic-leaf"/>}
+      {editing?<input className="topic-rename-input" autoFocus value={renameDraft} onChange={e=>setRenameDraft(e.target.value)} onBlur={()=>finishRename(node)} onKeyDown={e=>{if(e.key==="Enter")finishRename(node);if(e.key==="Escape")setRenaming(null)}}/>:<button className="topic-name" title={node.name} onClick={()=>onSelect(node.path)}>{node.name}</button>}
+      <em className="topic-tree-count">{count(node.path)}</em>{!editing&&<button className="topic-rename" title={`Rename ${node.name}`} aria-label={`Rename ${node.name}`} onClick={()=>{setRenaming(key);setRenameDraft(node.name)}}>✎</button>}<span className="topic-drag" title="Drag before, inside, or after another topic">⋮⋮</span>
+    </div>{node.children.length>0&&open&&<ul>{render(node.children)}</ul>}</li>
+  });
   return <div className="topic-navigator"><div className="topic-navigator-title"><b>Topics</b><button onClick={onEdit}>＋ Edit</button></div><label className="topic-filter"><span>⌕</span><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Filter topics"/>{search&&<button aria-label="Clear topic filter" onClick={()=>setSearch("")}>×</button>}</label><button className={!showUnfiled&&!selected.length?"all-topics active":"all-topics"} onClick={()=>onSelect([])}><span>All topics</span><em className="topic-tree-count">{total}</em></button><button className={showUnfiled?"all-topics active":"all-topics"} onClick={onSelectUnfiled}><span>Without topic</span><em className="topic-tree-count">{unfiledCount}</em></button><ul className="topic-tree">{render(tree)}</ul>{!tree.length&&<p className="no-topics">No topics yet. Add one from a card.</p>}</div>;
 }
 
@@ -207,7 +222,10 @@ export default function Home() {
   const valueTabsRef=useRef<HTMLElement>(null);
   const deckWrapRef=useRef<HTMLDivElement>(null);
   const cardPreviewRef=useRef<HTMLElement>(null);
-  const lastWheelFlip=useRef(0);
+  const wheelDistance=useRef(0);
+  const wheelQueue=useRef(0);
+  const wheelDrainTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+  const wheelIdleTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
   const pendingCard=useRef<Card|null>(null);
   const openCardRef=useRef<Card|null>(null);
   const editorCommitTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
@@ -235,7 +253,12 @@ export default function Home() {
   const currentItem=deckItems[Math.min(position,Math.max(deckItems.length-1,0))];
   const current=currentItem?.type==="card"?currentItem.card:null;
   useEffect(()=>{const card=cardPreviewRef.current;if(!card||previewExpanded)return;const fit=()=>{const finding=card.querySelector<HTMLElement>(".finding.rich-preview"),footer=card.querySelector<HTMLElement>("footer"),tags=card.querySelector<HTMLElement>(".tags"),matches=card.querySelector<HTMLElement>(".search-matches");if(!finding||!footer)return;const lineHeight=parseFloat(getComputedStyle(finding).lineHeight)||24;const reserve=matches?Math.min(62,matches.scrollHeight+10):tags&&tags.children.length?Math.min(62,tags.scrollHeight+22):8;const available=Math.max(lineHeight,footer.getBoundingClientRect().top-finding.getBoundingClientRect().top-reserve);card.style.setProperty("--preview-lines",String(Math.max(1,Math.min(8,Math.floor(available/lineHeight)))))};fit();const observer=new ResizeObserver(fit);observer.observe(card);return()=>observer.disconnect()},[current?.id,current?.title,current?.findings,current?.keywords.length,query,previewExpanded]);
-  useEffect(()=>{const deck=deckWrapRef.current;if(!deck)return;const wheel=(event:WheelEvent)=>{event.preventDefault();event.stopPropagation();if(Math.abs(event.deltaY)<8&&Math.abs(event.deltaX)<8)return;const now=Date.now();if(now-lastWheelFlip.current<180)return;lastWheelFlip.current=now;const delta=Math.abs(event.deltaY)>=Math.abs(event.deltaX)?event.deltaY:event.deltaX;setPosition(p=>delta>0?Math.min(deckItems.length-1,p+1):Math.max(0,p-1))};deck.addEventListener("wheel",wheel,{passive:false});return()=>deck.removeEventListener("wheel",wheel)},[deckItems.length,currentItem?.card.id]);
+  useEffect(()=>{const deck=deckWrapRef.current;if(!deck)return;
+    const drain=()=>{wheelDrainTimer.current=null;const direction=Math.sign(wheelQueue.current);if(!direction)return;wheelQueue.current-=direction;setPosition(current=>{const next=Math.max(0,Math.min(deckItems.length-1,current+direction));if(next===current)wheelQueue.current=0;return next});if(wheelQueue.current)wheelDrainTimer.current=setTimeout(drain,240)};
+    const queueStep=(direction:number)=>{wheelQueue.current=Math.max(-8,Math.min(8,wheelQueue.current+direction));if(!wheelDrainTimer.current)wheelDrainTimer.current=setTimeout(drain,0)};
+    const wheel=(event:WheelEvent)=>{event.preventDefault();event.stopPropagation();const raw=Math.abs(event.deltaY)>=Math.abs(event.deltaX)?event.deltaY:event.deltaX;if(Math.abs(raw)<1)return;const delta=event.deltaMode===WheelEvent.DOM_DELTA_LINE?raw*18:event.deltaMode===WheelEvent.DOM_DELTA_PAGE?raw*120:raw;wheelDistance.current+=delta;const threshold=72;while(Math.abs(wheelDistance.current)>=threshold){const direction=Math.sign(wheelDistance.current);wheelDistance.current-=direction*threshold;queueStep(direction)}if(wheelIdleTimer.current)clearTimeout(wheelIdleTimer.current);wheelIdleTimer.current=setTimeout(()=>{if(Math.abs(wheelDistance.current)>=12)queueStep(Math.sign(wheelDistance.current));wheelDistance.current=0},110)};
+    deck.addEventListener("wheel",wheel,{passive:false});return()=>{deck.removeEventListener("wheel",wheel);if(wheelDrainTimer.current)clearTimeout(wheelDrainTimer.current);if(wheelIdleTimer.current)clearTimeout(wheelIdleTimer.current);wheelDrainTimer.current=null;wheelIdleTimer.current=null;wheelQueue.current=0;wheelDistance.current=0}
+  },[deckItems.length]);
   const kindCards=useMemo(()=>cards.filter(c=>(c.kind||"paper")===kind),[cards,kind]);
   const matchingKindCards=useMemo(()=>kindCards.filter(card=>matchesSearch(card)&&(kind!=="paper"||!duplicatesOnly||(duplicateTitleCounts.get(duplicateTitleKey(card))||0)>1)),[kindCards,queryNeedle,searchIndex,kind,duplicatesOnly,duplicateTitleCounts]);
   const allTags=useMemo(()=>Array.from(new Set(kindCards.flatMap(c=>c.keywords))).sort(),[kindCards]);
@@ -266,7 +289,29 @@ export default function Home() {
   function addCategoryFromCard(card:Card){setNewCategoryName("");setAddingCategoryFor(card.id)}
   function saveNewCategory(){const category=newCategoryName.trim();const card=(open?.id===addingCategoryFor?open:null)||cards.find(c=>c.id===addingCategoryFor);if(!category||!card)return;const existing=statuses.find(s=>s.toLowerCase()===category.toLowerCase())||category;if(!statuses.some(s=>s.toLowerCase()===category.toLowerCase()))setStatuses(current=>[...current,category]);update(withCategories(card,[...cardCategories(card),existing]),true);setAddingCategoryFor(null);setNewCategoryName("")}
   function toggleCategory(card:Card,category:string){const current=cardCategories(card),exists=current.some(value=>value.toLowerCase()===category.toLowerCase());update(withCategories(card,exists?current.filter(value=>value.toLowerCase()!==category.toLowerCase()):[...current,category]))}
-  function reorderTopic(source:string[],target:string[]){if(source.join(" > ")===target.join(" > ")||source.slice(0,-1).join(" > ")!==target.slice(0,-1).join(" > "))return;const allKeys=Array.from(new Set(existingTopicPaths.flatMap(path=>path.map((_,index)=>path.slice(0,index+1).join(" > ")))));setTopicOrder(current=>{const next=Array.from(new Set([...current,...allKeys])).filter(key=>key!==source.join(" > "));const targetIndex=next.indexOf(target.join(" > "));next.splice(targetIndex<0?next.length:targetIndex,0,source.join(" > "));return next})}
+  function reorderTopic(source:string[],target:string[],placement:TopicDropPlacement){
+    source=source.filter(Boolean).slice(0,5);target=target.filter(Boolean).slice(0,5);
+    const same=(left:string[],right:string[])=>left.length===right.length&&left.every((level,index)=>level===right[index]);
+    const startsWith=(path:string[],prefix:string[])=>prefix.every((level,index)=>path[index]===level);
+    if(!source.length||!target.length||same(source,target)||startsWith(target,source))return;
+    const parent=placement==="inside"?target:target.slice(0,-1),newPrefix=[...parent,source[source.length-1]];
+    const descendants=existingTopicPaths.filter(path=>startsWith(path,source)),deepestSuffix=Math.max(0,...descendants.map(path=>path.length-source.length));
+    if(newPrefix.length+deepestSuffix>5)return;
+    const collision=existingTopicPaths.some(path=>startsWith(path,newPrefix)&&!startsWith(path,source));
+    if(collision)return;
+    const transform=(path:string[])=>startsWith(path,source)?[...newPrefix,...path.slice(source.length)]:path;
+    const allPaths=Array.from(new Map(existingTopicPaths.flatMap(path=>path.map((_,index)=>path.slice(0,index+1))).map(path=>[path.join(" > ").toLowerCase(),path])).values());
+    const rank=new Map(topicOrder.map((key,index)=>[key.toLowerCase(),index]));
+    const ordered=allPaths.sort((a,b)=>(rank.get(a.join(" > ").toLowerCase())??Number.MAX_SAFE_INTEGER)-(rank.get(b.join(" > ").toLowerCase())??Number.MAX_SAFE_INTEGER)||a.join(" > ").localeCompare(b.join(" > ")));
+    const moving=ordered.filter(path=>startsWith(path,source)).map(transform),remaining=ordered.filter(path=>!startsWith(path,source));
+    let insertion=remaining.length;
+    if(placement==="before"){const targetIndex=remaining.findIndex(path=>same(path,target));insertion=targetIndex<0?remaining.length:targetIndex}
+    else {const lastTarget=remaining.reduce((last,path,index)=>startsWith(path,target)?index:last,-1);if(lastTarget>=0)insertion=lastTarget+1}
+    const nextOrder=[...remaining.slice(0,insertion),...moving,...remaining.slice(insertion)].map(path=>path.join(" > "));
+    change(current=>current.map(card=>startsWith(card.projects,source)?{...card,projects:transform(card.projects)}:card));
+    setTopicOrder(Array.from(new Set(nextOrder)));
+    setProjectPath(current=>startsWith(current,source)?transform(current):current);
+  }
   function renameTopic(path:string[],name:string){const clean=name.trim();if(!clean)return;const depth=path.length-1,oldPrefix=path.join(" > "),nextPath=[...path.slice(0,-1),clean],newPrefix=nextPath.join(" > ");change(current=>current.map(card=>{if(!path.every((level,index)=>card.projects[index]===level))return card;const projects=[...card.projects];projects[depth]=clean;return {...card,projects,title:card.kind==="project"&&card.projects.length===path.length?clean:card.title}}));setTopicOrder(current=>Array.from(new Set(current.map(key=>key===oldPrefix||key.startsWith(`${oldPrefix} > `)?`${newPrefix}${key.slice(oldPrefix.length)}`:key))));setProjectPath(current=>path.every((level,index)=>current[index]===level)?[...nextPath,...current.slice(path.length)]:current)}
   async function attachImages(files: FileList) {
     const additions=await Promise.all(Array.from(files).filter(f=>f.type.startsWith("image/")).map(file=>new Promise<{id:number;name:string;data:string}>((resolve,reject)=>{
