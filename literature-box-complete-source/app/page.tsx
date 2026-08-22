@@ -25,6 +25,7 @@ const seed: Card[] = [
 ];
 
 const defaultStatuses = ["To read", "Reading", "Read", "Annotated"];
+const EDITOR_IDLE_SAVE_MS = 10_000;
 const blank = (kind:"paper"|"author"|"journal"|"topic"|"project"): Card => ({ id: Date.now(), createdAt:Date.now(), kind, title: kind==="paper"?"Untitled paper":kind==="author"?"Unnamed author":kind==="journal"?"Untitled journal":kind==="project"?"Untitled project":"Untitled topic", authors: "", year: "", journal: "", doi: "", topics: [], keywords: [], projects: [], status: "", categories:[], findings: "", methods: "", limitations: "", notes: "", link: "", subtopics:[] });
 const split = (s: string) => s.split(",").map(x => x.trim()).filter(Boolean);
 const plain = (s:string) => s.replace(/\r?\n|\t/g," ").replace(/<\s*br\s*\/?\s*>/gi,"\n").replace(/<\/(?:p|div|li)>/gi,"\n").replace(/<li[^>]*>/gi,"• ").replace(/<[^>]*>/g,"").replace(/&nbsp;/g," ").replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/\n{3,}/g,"\n\n").trim();
@@ -98,47 +99,68 @@ function HighlightText({text,term}:{text:string;term:string}){
   return <>{parts.map((part,i)=>i%2?<mark className="search-highlight" key={i}>{part}</mark>:part)}</>;
 }
 function safeRichHtml(value:string,term=""){
-  let safe=limitRichBlankLines(value.replace(/<!--\[if[\s\S]*?<!\[endif\]-->/gi,"").replace(/<!--[\s\S]*?-->/g,"").replace(/<xml[\s\S]*?<\/xml>/gi,"").replace(/<script[\s\S]*?<\/script>/gi,"").replace(/<style[\s\S]*?<\/style>/gi,"").replace(/<\/?(?:o|w|m):[^>]*>/gi,"").replace(/\r?\n|\t/g," ").replace(/<span\b[^>]*class=["']double-underline["'][^>]*>/gi,'<span class="double-underline">').replace(/<(b|strong|i|em|ul|ol|li|p|div)\b[^>]*>/gi,"<$1>").replace(/<br\b[^>]*>/gi,"<br>").replace(/<(?!\/?(?:b|strong|i|em|ul|ol|li|p|div|br|span)\b)[^>]*>/gi,"").replace(/<span(?! class="double-underline">)[^>]*>/gi,""));
+  const plainTextValue=!/<(?:p|div|ul|ol|li|br)\b/i.test(value);
+  const source=plainTextValue?value.replace(/\r\n?/g,"\n").replace(/\n/g,"<br>").replace(/\t/g,"    "):value.replace(/\r?\n|\t/g," ");
+  let safe=limitRichBlankLines(source.replace(/<!--\[if[\s\S]*?<!\[endif\]-->/gi,"").replace(/<!--[\s\S]*?-->/g,"").replace(/<xml[\s\S]*?<\/xml>/gi,"").replace(/<script[\s\S]*?<\/script>/gi,"").replace(/<style[\s\S]*?<\/style>/gi,"").replace(/<\/?(?:o|w|m):[^>]*>/gi,"").replace(/<span\b[^>]*class=["']double-underline["'][^>]*>/gi,'<span class="double-underline">').replace(/<(b|strong|i|em|ul|ol|li|p|div)\b[^>]*>/gi,"<$1>").replace(/<br\b[^>]*>/gi,"<br>").replace(/<(?!\/?(?:b|strong|i|em|ul|ol|li|p|div|br|span)\b)[^>]*>/gi,"").replace(/<span(?! class="double-underline">)[^>]*>/gi,""));
   const needle=term.trim();if(!needle)return safe;
   const escaped=needle.replace(/[|\\{}()[\]^$+*?.-]/g,"\\$&"),matcher=new RegExp(`(${escaped})`,"gi");
   return safe.split(/(<[^>]+>)/g).map(part=>part.startsWith("<")?part:part.replace(matcher,'<mark class="search-highlight">$1</mark>')).join("");
 }
-function RichPreview({html,term="",className="",inline=false}:{html:string;term?:string;className?:string;inline?:boolean}){let rendered=safeRichHtml(html,term);if(inline)rendered=rendered.replace(/<(?:p|div|ul|ol)>/gi,"").replace(/<li>/gi,"• ").replace(/<\/(?:p|div|li|ul|ol)>/gi,"<br>").replace(/(?:<br>\s*)+$/gi,"");return <div className={className} dangerouslySetInnerHTML={{__html:rendered}}/>}
+function RichPreview({html,term="",className=""}:{html:string;term?:string;className?:string;inline?:boolean}){const rendered=safeRichHtml(html,term);return <div className={className} dangerouslySetInnerHTML={{__html:rendered}}/>}
 function searchExcerpt(text:string,term:string){const needle=term.trim().toLowerCase();const index=text.toLowerCase().indexOf(needle);if(index<0)return text;const start=Math.max(0,index-58),end=Math.min(text.length,index+needle.length+82);return `${start?"…":""}${text.slice(start,end).trim()}${end<text.length?"…":""}`}
-function parseCitation(raw:string):Partial<Card>{
-  const text=raw.replace(/\s+/g," ").trim();
+const citationSentences=(value:string)=>value.split(/(?<=[.!?])\s+(?=[A-Z0-9“"'(])/u).map(part=>part.trim()).filter(Boolean);
+const cleanCitationField=(value:string)=>value.replace(/^[\s.,;:()[\]]+|[\s.,;:()[\]]+$/g,"").trim();
+const cleanJournal=(value:string)=>cleanCitationField(value.split(/,\s*(?:vol\.?|no\.?|pp?\.?|\d+\s*\(|\d+\s*[,;:]\s*\d)/i)[0]||"");
+export function parseCitation(raw:string):Partial<Card>{
+  const text=raw.replace(/[\r\n\t]+/g," ").replace(/\s+/g," ").trim();
   if(!text)return{};
   const doiMatch=text.match(/(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*)?(10\.\d{4,9}\/[\w.()/:;-]+)/i);
-  const yearMatch=text.match(/\((\d{4}[a-z]?)\)|\b(1[5-9]\d{2}|20\d{2})[a-z]?\b/i);
+  const withoutDoi=text.replace(/(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*)?10\.\d{4,9}\/[\w.()/:;-]+\.?/ig,"").replace(/https?:\/\/\S+/g,"").trim();
+  const yearMatch=withoutDoi.match(/\(((?:1[5-9]\d{2}|20\d{2})[a-z]?)\)|\b((?:1[5-9]\d{2}|20\d{2})[a-z]?)\b/i);
   const year=(yearMatch?.[1]||yearMatch?.[2]||"").slice(0,4);
   const yearIndex=yearMatch?.index??-1;
-  let authors=yearIndex>0?text.slice(0,yearIndex).replace(/[\s.,;:]+$/g,""):"";
+  const afterYear=yearIndex>=0?cleanCitationField(withoutDoi.slice(yearIndex+(yearMatch?.[0].length||0))):"";
+  const afterYearHasTitle=/[\p{L}]{3}/u.test(afterYear)&&!/^(?:\d+\s*)?[;:,]\s*\d/.test(afterYear);
+  const quoted=withoutDoi.match(/[“\"']([^”\"']{4,})[”\"']/);
+  let authors="",title="",journal="";
+
+  if(quoted){
+    title=cleanCitationField(quoted[1]);
+    const quoteIndex=quoted.index??0;
+    const beforeQuote=withoutDoi.slice(0,quoteIndex).replace(yearMatch?.[0]||"","");
+    authors=cleanCitationField(beforeQuote);
+    journal=cleanJournal(withoutDoi.slice(quoteIndex+quoted[0].length));
+  }else if(yearIndex>=0&&afterYearHasTitle){
+    authors=cleanCitationField(withoutDoi.slice(0,yearIndex));
+    const parts=citationSentences(afterYear);
+    title=cleanCitationField(parts.shift()||afterYear);
+    journal=cleanJournal(parts.shift()||"");
+  }else{
+    const beforeYear=yearIndex>=0?withoutDoi.slice(0,yearIndex):withoutDoi;
+    const parts=citationSentences(beforeYear);
+    authors=cleanCitationField(parts.shift()||"");
+    title=cleanCitationField(parts.shift()||"");
+    journal=cleanJournal(parts.shift()||"");
+  }
+
   authors=authors.replace(/\s+(?:&|and)\s+/gi,"; ").replace(/\s*;\s*/g,"; ");
   const apaNames=authors.match(/(?:[\p{L}'’-]+(?:\s+[\p{L}'’-]+)*,\s*(?:[A-Z]\.?\s*){1,4})/gu);
-  if(apaNames&&apaNames.length>1)authors=apaNames.map(name=>name.trim().replace(/[,.\s]+$/,"" )).join("; ");
-  let remainder=yearIndex>=0?text.slice(yearIndex+(yearMatch?.[0].length||0)):text;
-  remainder=remainder.replace(/^[\s.,;:()]+/,"").replace(/(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*)?10\.\d{4,9}\/[\w.()/:;-]+\.?/ig,"").trim();
-  const quoted=remainder.match(/^[“\"']([^”\"']+)[”\"'][,.]?\s*(.*)$/);
-  let title="",journal="";
-  if(quoted){title=quoted[1].trim();journal=quoted[2].split(/,\s*(?:vol\.?|no\.?|pp?\.?|\d+\s*\()/i)[0].replace(/[.,\s]+$/g,"").trim()}
-  else {const parts=remainder.split(/\.\s+(?=[A-Z])/).map(p=>p.trim()).filter(Boolean);title=(parts.shift()||"").replace(/[.\s]+$/g,"");journal=(parts.shift()||"").split(/,\s*(?:vol\.?|no\.?|pp?\.?|\d+\s*\()/i)[0].replace(/[.,\s]+$/g,"").trim()}
+  if(apaNames&&apaNames.length>1)authors=apaNames.map(name=>name.trim().replace(/[,.\s]+$/,"")).join("; ");
   return {authors,year,title,journal,doi:doiMatch?.[1]?.replace(/[.)]+$/g,"")||""};
 }
 
-function DraftInput({value,onCommit,...props}:{value:string;onCommit:(value:string)=>void}&Omit<InputHTMLAttributes<HTMLInputElement>,"value"|"onChange">){
-  const [draft,setDraft]=useState(value),ref=useRef<HTMLInputElement>(null),timer=useRef<ReturnType<typeof setTimeout>|null>(null);
+function DraftInput({value,onCommit,...props}:{value:string;onCommit:(value:string,immediate?:boolean)=>void}&Omit<InputHTMLAttributes<HTMLInputElement>,"value"|"onChange">){
+  const [draft,setDraft]=useState(value),ref=useRef<HTMLInputElement>(null);
   useEffect(()=>{if(document.activeElement!==ref.current)setDraft(value)},[value]);
-  useEffect(()=>()=>{if(timer.current)clearTimeout(timer.current)},[]);
-  const queue=(next:string)=>{setDraft(next);if(timer.current)clearTimeout(timer.current);timer.current=setTimeout(()=>onCommit(next),500)};
-  const finish=(next=draft)=>{if(timer.current)clearTimeout(timer.current);onCommit(next)};
+  const queue=(next:string)=>{setDraft(next);onCommit(next)};
+  const finish=(next=draft)=>onCommit(next,true);
   return <input {...props} ref={ref} value={draft} onChange={event=>queue(event.target.value)} onBlur={event=>{finish(event.currentTarget.value);props.onBlur?.(event)}}/>;
 }
-function DraftTextarea({value,onCommit,...props}:{value:string;onCommit:(value:string)=>void}&Omit<TextareaHTMLAttributes<HTMLTextAreaElement>,"value"|"onChange">){
-  const [draft,setDraft]=useState(value),ref=useRef<HTMLTextAreaElement>(null),timer=useRef<ReturnType<typeof setTimeout>|null>(null);
+function DraftTextarea({value,onCommit,...props}:{value:string;onCommit:(value:string,immediate?:boolean)=>void}&Omit<TextareaHTMLAttributes<HTMLTextAreaElement>,"value"|"onChange">){
+  const [draft,setDraft]=useState(value),ref=useRef<HTMLTextAreaElement>(null);
   useEffect(()=>{if(document.activeElement!==ref.current)setDraft(value)},[value]);
-  useEffect(()=>()=>{if(timer.current)clearTimeout(timer.current)},[]);
-  const queue=(next:string)=>{setDraft(next);if(timer.current)clearTimeout(timer.current);timer.current=setTimeout(()=>onCommit(next),500)};
-  const finish=(next=draft)=>{if(timer.current)clearTimeout(timer.current);onCommit(next)};
+  const queue=(next:string)=>{setDraft(next);onCommit(next)};
+  const finish=(next=draft)=>onCommit(next,true);
   return <textarea {...props} ref={ref} value={draft} onChange={event=>queue(event.target.value)} onBlur={event=>{finish(event.currentTarget.value);props.onBlur?.(event)}}/>;
 }
 function CitationImporter({onIdentify}:{onIdentify:(fields:Partial<Card>)=>void}){
@@ -148,12 +170,10 @@ function CitationImporter({onIdentify}:{onIdentify:(fields:Partial<Card>)=>void}
   const identify=(value:string)=>{setCitation(value);if(timer.current)clearTimeout(timer.current);if(value.trim())timer.current=setTimeout(()=>onIdentify(parseCitation(value)),500)};
   return <label className="citation-importer">Paste text citation<textarea value={citation} placeholder="Paste an APA, Harvard, or similar bibliography entry…" onChange={e=>identify(e.target.value)}/><small className="field-help">Title, authors, year, journal, and DOI are identified automatically. Check the fields below before closing.</small></label>;
 }
-function RichField({label,value,onChange}:{label:string,value:string,onChange:(v:string)=>void}) {
+function RichField({label,value,onChange}:{label:string,value:string,onChange:(v:string,immediate?:boolean)=>void}) {
   const ref=useRef<HTMLDivElement>(null);
-  const timer=useRef<ReturnType<typeof setTimeout>|null>(null);
   useEffect(()=>{const editor=ref.current;if(editor&&document.activeElement!==editor&&editor.innerHTML!==value)editor.innerHTML=value},[value]);
-  useEffect(()=>()=>{if(timer.current)clearTimeout(timer.current)},[]);
-  const commit=(html:string,immediate=false)=>{if(timer.current)clearTimeout(timer.current);if(immediate)onChange(html);else timer.current=setTimeout(()=>onChange(html),500)};
+  const commit=(html:string,immediate=false)=>onChange(html,immediate);
   const doubleUnderline=()=>{const editor=ref.current,selection=window.getSelection();if(!editor||!selection||!selection.rangeCount)return;const range=selection.getRangeAt(0);if(range.collapsed||!editor.contains(range.commonAncestorContainer))return;const span=document.createElement("span");span.className="double-underline";try{range.surroundContents(span)}catch{span.append(range.extractContents());range.insertNode(span)}selection.removeAllRanges();const next=document.createRange();next.selectNodeContents(span);selection.addRange(next);editor.dispatchEvent(new InputEvent("input",{bubbles:true,inputType:"formatUnderline"}))};
   return <div className="rich-label"><span className="rich-title">{label}</span><span className="rich-tools">
     <button type="button" onMouseDown={e=>{e.preventDefault();document.execCommand("bold")}}><b>B</b></button>
@@ -163,24 +183,30 @@ function RichField({label,value,onChange}:{label:string,value:string,onChange:(v
   </span><div ref={ref} className="rich-editor" contentEditable suppressContentEditableWarning role="textbox" aria-label={label} aria-multiline="true" onKeyDown={e=>{if(e.key==="Tab"){e.preventDefault();document.execCommand("insertHTML",false,"&nbsp;&nbsp;&nbsp;&nbsp;")}}} onPaste={e=>{if(Array.from(e.clipboardData.files).some(file=>file.type.startsWith("image/")))return;e.preventDefault();const html=e.clipboardData.getData("text/html");document.execCommand(html?"insertHTML":"insertText",false,html?cleanRichHtml(html):e.clipboardData.getData("text/plain"))}} onInput={e=>commit(e.currentTarget.innerHTML)} onBlur={e=>commit(e.currentTarget.innerHTML,true)}/></div>
 }
 
-function TagField({label,values,onChange,suggestions=[]}:{label:string;values:string[];onChange:(values:string[])=>void;suggestions?:string[]}) {
+function TagField({label,values,onChange,suggestions=[]}:{label:string;values:string[];onChange:(values:string[],immediate?:boolean)=>void;suggestions?:string[]}) {
   const [text,setText]=useState(values.join(", "));
+  const [search,setSearch]=useState("");
   const input=useRef<HTMLInputElement>(null);
   useEffect(()=>{if(document.activeElement!==input.current)setText(values.join(", "))},[values]);
-  const commit=()=>{const parsed=split(text);setText(parsed.join(", "));onChange(parsed)};
-  return <label>{label}<input ref={input} value={text} placeholder="Separate tags with commas" onChange={e=>setText(e.target.value)} onBlur={commit} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();commit();input.current?.blur()}}}/>{suggestions.some(s=>!values.includes(s))&&<span className="tag-suggestions">{suggestions.filter(s=>!values.includes(s)).slice(0,10).map(s=><button type="button" key={s} onMouseDown={e=>e.preventDefault()} onClick={()=>{const next=[...values,s];setText(next.join(", "));onChange(next)}}>＋ {s}</button>)}</span>}</label>;
+  const selected=split(text),selectedKeys=new Set(selected.map(value=>value.toLocaleLowerCase()));
+  const available=suggestions.filter(s=>!selectedKeys.has(s.toLocaleLowerCase())&&(!search.trim()||s.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())));
+  const draft=(next:string)=>{setText(next);onChange(split(next))};
+  const commit=()=>{const parsed=split(text);setText(parsed.join(", "));onChange(parsed,true)};
+  const add=(suggestion:string)=>{const next=Array.from(new Map([...selected,suggestion].map(value=>[value.toLocaleLowerCase(),value])).values());setText(next.join(", "));onChange(next)};
+  return <div className="tag-field"><label>{label}<input ref={input} value={text} placeholder="Separate tags with commas" onChange={e=>draft(e.target.value)} onBlur={commit} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();commit();input.current?.blur()}}}/></label>{suggestions.some(s=>!selectedKeys.has(s.toLocaleLowerCase()))&&<details className="keyword-picker" onToggle={e=>{if(!e.currentTarget.open)setSearch("")}}><summary>Choose existing keywords <em>{suggestions.length}</em></summary><div><label className="keyword-picker-search"><span>⌕</span><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Filter keywords"/></label><div className="keyword-option-list">{available.map(s=><button type="button" key={s} onClick={()=>add(s)}>＋ {s}</button>)}{!available.length&&<small>No matching keywords.</small>}</div></div></details>}</div>;
 }
 
-function ProjectField({values,onChange,suggestions=[]}:{values:string[];onChange:(values:string[])=>void;suggestions?:string[][]}) {
+function ProjectField({values,onChange,suggestions=[]}:{values:string[];onChange:(values:string[],immediate?:boolean)=>void;suggestions?:string[][]}) {
   const [text,setText]=useState(values.join(" > "));
   const [menuOpen,setMenuOpen]=useState(false);
   const input=useRef<HTMLInputElement>(null);
   useEffect(()=>{if(document.activeElement!==input.current)setText(values.join(" > "))},[values]);
-  const commit=()=>{const levels=text.split(">").map(x=>x.trim()).filter(Boolean).slice(0,5);setText(levels.join(" > "));onChange(levels)};
+  const parseLevels=(value:string)=>value.split(">").map(x=>x.trim()).filter(Boolean).slice(0,5);
+  const commit=()=>{const levels=parseLevels(text);setText(levels.join(" > "));onChange(levels,true)};
   const needle=(text.trim()===values.join(" > ")?"":text.trim()).toLowerCase();
   const available=suggestions.filter(path=>path.length&&path.join(" > ")!==values.join(" > ")&&(!needle||path.join(" > ").toLowerCase().includes(needle)));
-  const choose=(path:string[])=>{const next=path.slice(0,5);setText(next.join(" > "));onChange(next);setMenuOpen(false)};
-  return <label className="project-field">Topic hierarchy<input ref={input} value={text} role="combobox" aria-expanded={menuOpen} aria-controls="topic-path-options" autoComplete="off" placeholder="Topic > Subtopic > Section (5 levels max)" onFocus={()=>setMenuOpen(true)} onChange={e=>{setText(e.target.value);setMenuOpen(true)}} onBlur={()=>{commit();setTimeout(()=>setMenuOpen(false),100)}} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();commit();setMenuOpen(false);input.current?.blur()}else if(e.key==="Escape")setMenuOpen(false)}}/>{menuOpen&&available.length>0&&<div id="topic-path-options" className="topic-path-dropdown" role="listbox" onMouseDown={e=>e.preventDefault()}>{available.map(path=><button type="button" role="option" aria-selected={false} key={path.join("/")} onClick={()=>choose(path)}>{path.map((level,index)=><span key={`${level}-${index}`} style={{paddingLeft:`${index*10}px`}}>{index?"› ":""}{level}</span>)}</button>)}</div>}<small className="field-help">Separate levels with &gt;, or choose an existing topic from the scrollable menu.</small></label>;
+  const choose=(path:string[])=>{const next=path.slice(0,5);setText(next.join(" > "));onChange(next,true);setMenuOpen(false)};
+  return <label className="project-field">Topic hierarchy<input ref={input} value={text} role="combobox" aria-expanded={menuOpen} aria-controls="topic-path-options" autoComplete="off" placeholder="Topic > Subtopic > Section (5 levels max)" onFocus={()=>setMenuOpen(true)} onChange={e=>{setText(e.target.value);onChange(parseLevels(e.target.value));setMenuOpen(true)}} onBlur={()=>{commit();setTimeout(()=>setMenuOpen(false),100)}} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();commit();setMenuOpen(false);input.current?.blur()}else if(e.key==="Escape")setMenuOpen(false)}}/>{menuOpen&&available.length>0&&<div id="topic-path-options" className="topic-path-dropdown" role="listbox" onMouseDown={e=>e.preventDefault()}>{available.map(path=><button type="button" role="option" aria-selected={false} key={path.join("/")} onClick={()=>choose(path)}>{path.map((level,index)=><span key={`${level}-${index}`} style={{paddingLeft:`${index*10}px`}}>{index?"› ":""}{level}</span>)}</button>)}</div>}<small className="field-help">Separate levels with &gt;, or choose an existing topic from the scrollable menu.</small></label>;
 }
 
 type TopicNode={name:string;path:string[];children:TopicNode[]};
@@ -285,7 +311,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const selectFilter=useCallback((value:string)=>{setFilter(value);setPosition(0)},[]);
 
   useEffect(() => {let cancelled=false;(async()=>{let raw:unknown=window.literatureBox?await window.literatureBox.loadCards():await loadBrowserState();if(cancelled)return;const stored=Array.isArray(raw)?raw:(raw as {cards?:Card[]})?.cards;const savedStatuses=!Array.isArray(raw)?(raw as {statuses?:string[]})?.statuses:undefined;const savedTopicOrder=!Array.isArray(raw)?(raw as {topicOrder?:string[]})?.topicOrder:undefined;if(savedStatuses?.length)setStatuses(savedStatuses);if(savedTopicOrder?.length)setTopicOrder(savedTopicOrder);if(stored){const migrated:Card[]=stored.map((c:Card,i:number)=>withCategories({...c,createdAt:c.createdAt||(c.id>1_000_000_000_000?c.id:Date.now()-(stored.length-i)*1000),kind:c.kind||"paper",keywords:Array.from(new Set([...(c.keywords||[]),...(c.topics||[]),...(c.subtopics||[])])),topics:[],subtopics:[]},cardCategories(c)));if(!migrated.some(c=>c.kind==="author"))migrated.push({...seed.find(c=>c.kind==="author")!,createdAt:Date.now(),keywords:Array.from(new Set([...(seed.find(c=>c.kind==="author")?.keywords||[]),...(seed.find(c=>c.kind==="author")?.topics||[])])),topics:[]});if(!migrated.some(c=>c.kind==="journal"))migrated.push({...seed.find(c=>c.kind==="journal")!,createdAt:Date.now(),keywords:Array.from(new Set([...(seed.find(c=>c.kind==="journal")?.keywords||[]),...(seed.find(c=>c.kind==="journal")?.topics||[])])),topics:[]});const existingProjects=new Set(migrated.filter(c=>c.kind==="project").map(c=>c.projects.join(" > ")));const topicNames=Array.from(new Set(migrated.filter(c=>(c.kind||"paper")==="paper").map(c=>c.projects[0]).filter(Boolean)));topicNames.forEach((title,i)=>{if(!existingProjects.has(title))migrated.push({...blank("project"),id:4000+i,title,projects:[title]})});setCards(migrated)}setReady(true)})();return()=>{cancelled=true}}, []);
-  useEffect(() => {if(!ready)return;const generation=++saveGeneration.current;setSaved(false);let idleHandle:number|null=null;const scheduler=window as Window&{requestIdleCallback?:(callback:()=>void,options?:{timeout:number})=>number;cancelIdleCallback?:(handle:number)=>void};const timer=setTimeout(()=>{const save=async()=>{if(generation!==saveGeneration.current)return;try{const state:LibraryState={cards,statuses,topicOrder};if(window.literatureBox){const json=await stringifyOffThread(state);if(generation!==saveGeneration.current)return;await window.literatureBox.saveCards(json)}else await saveBrowserState(state);if(generation===saveGeneration.current)setSaved(true)}catch(error){console.error("Literature Box save failed",error)}};if(scheduler.requestIdleCallback)idleHandle=scheduler.requestIdleCallback(()=>void save(),{timeout:1200});else void save()},1400);return()=>{clearTimeout(timer);if(idleHandle!==null)scheduler.cancelIdleCallback?.(idleHandle)}},[cards,statuses,topicOrder,ready]);
+  useEffect(() => {if(!ready)return;const generation=++saveGeneration.current;setSaved(false);let idleHandle:number|null=null;const scheduler=window as Window&{requestIdleCallback?:(callback:()=>void,options?:{timeout:number})=>number;cancelIdleCallback?:(handle:number)=>void};const timer=setTimeout(()=>{const save=async()=>{if(generation!==saveGeneration.current)return;try{const state:LibraryState={cards,statuses,topicOrder};if(window.literatureBox){const json=await stringifyOffThread(state);if(generation!==saveGeneration.current)return;await window.literatureBox.saveCards(json)}else await saveBrowserState(state);if(generation===saveGeneration.current)setSaved(true)}catch(error){console.error("Literature Box save failed",error)}};if(scheduler.requestIdleCallback)idleHandle=scheduler.requestIdleCallback(()=>void save(),{timeout:1200});else void save()},50);return()=>{clearTimeout(timer);if(idleHandle!==null)scheduler.cancelIdleCallback?.(idleHandle)}},[cards,statuses,topicOrder,ready]);
   useEffect(()=>()=>{if(editorCommitTimer.current)clearTimeout(editorCommitTimer.current)},[]);
   useEffect(()=>{openCardRef.current=open},[open]);
   useEffect(()=>{const tabs=valueTabsRef.current;if(!tabs)return;const wheel=(event:WheelEvent)=>{if(tabs.scrollWidth<=tabs.clientWidth)return;event.preventDefault();event.stopPropagation();tabs.scrollLeft+=Math.abs(event.deltaY)>Math.abs(event.deltaX)?event.deltaY:event.deltaX};tabs.addEventListener("wheel",wheel,{passive:false});return()=>tabs.removeEventListener("wheel",wheel)},[kind,groupBy]);
@@ -301,7 +327,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     return (c.kind||"paper")===kind&&grouped&&duplicateMatch&&(!queryNeedle||meta.search.includes(queryNeedle));
   }).sort((a,b)=>{const left=cardMetadata.get(a.id)!,right=cardMetadata.get(b.id)!;return sort==="project"?left.sortTopic.localeCompare(right.sortTopic)||right.created-left.created:sort==="keyword"?left.sortKeyword.localeCompare(right.sortKeyword)||right.created-left.created:sort==="author"?left.sortAuthor.localeCompare(right.sortAuthor):sort==="title"?left.sortTitle.localeCompare(right.sortTitle):sort==="oldest"?left.created-right.created:right.created-left.created}),[deferredCards,cardMetadata,queryNeedle,filter,sort,kind,groupBy,projectPath,duplicatesOnly,duplicateTitleCounts]);
   const deckItems=useMemo(()=>visible.map(card=>({type:"card" as const,card})),[visible]);
-  useEffect(()=>{const key=(e:KeyboardEvent)=>{const target=e.target as HTMLElement;const editing=target.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName);if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="k"){e.preventDefault();searchRef.current?.focus()}else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="n"){e.preventDefault();addCard()}else if(!openCardRef.current&&!editing&&e.key==="ArrowRight")setPosition(p=>Math.min(deckItems.length-1,p+1));else if(!openCardRef.current&&!editing&&e.key==="ArrowLeft")setPosition(p=>Math.max(0,p-1));else if(!editing&&(e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redo():undo()}else if(!editing&&(e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="y"){e.preventDefault();redo()}};window.addEventListener("keydown",key);return()=>window.removeEventListener("keydown",key)},[deckItems.length,kind]);
+  useEffect(()=>{const key=(e:KeyboardEvent)=>{const target=e.target as HTMLElement;const editing=target.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName);if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="s"){e.preventDefault();commitOpenCard(pendingCard.current||openCardRef.current)}else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="k"){e.preventDefault();searchRef.current?.focus()}else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="n"){e.preventDefault();addCard()}else if(!openCardRef.current&&!editing&&e.key==="ArrowRight")setPosition(p=>Math.min(deckItems.length-1,p+1));else if(!openCardRef.current&&!editing&&e.key==="ArrowLeft")setPosition(p=>Math.max(0,p-1));else if(!editing&&(e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redo():undo()}else if(!editing&&(e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="y"){e.preventDefault();redo()}};window.addEventListener("keydown",key);return()=>window.removeEventListener("keydown",key)},[deckItems.length,kind]);
   const boundedPosition=Math.min(position,Math.max(deckItems.length-1,0));
   const currentItem=deckItems[boundedPosition];
   const current=currentItem?.type==="card"?currentItem.card:null;
@@ -309,7 +335,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const kindCards=useMemo(()=>deferredCards.filter(c=>(c.kind||"paper")===kind),[deferredCards,kind]);
   const matchingKindCards=useMemo(()=>kindCards.filter(card=>{const meta=cardMetadata.get(card.id)!;return(!queryNeedle||meta.search.includes(queryNeedle))&&(kind!=="paper"||!duplicatesOnly||(duplicateTitleCounts.get(meta.duplicateKey)||0)>1)}),[kindCards,cardMetadata,queryNeedle,kind,duplicatesOnly,duplicateTitleCounts]);
   const allTags=useMemo(()=>Array.from(new Set(kindCards.flatMap(c=>getCardMeta(c).keywords))).sort(),[kindCards]);
-  const allKeywords=allTags;
+  const allKeywords=useMemo(()=>Array.from(new Map(deferredCards.filter(card=>card.kind!=="project").flatMap(card=>card.keywords||[]).map(value=>value.trim()).filter(Boolean).map(value=>[value.toLocaleLowerCase(),value])).values()).sort((a,b)=>a.localeCompare(b)),[deferredCards]);
   const existingTopicPaths=useMemo(()=>{if(kind!=="paper")return[];const paths=deferredCards.filter(c=>(c.kind||"paper")==="paper"||c.kind==="project").map(c=>c.projects.filter(Boolean).slice(0,5)).filter(path=>path.length);const order=new Map(topicOrder.map((key,index)=>[key.toLowerCase(),index]));return Array.from(new Map(paths.map(path=>[path.join(" > ").toLowerCase(),path])).values()).sort((a,b)=>(order.get(a.join(" > ").toLowerCase())??Number.MAX_SAFE_INTEGER)-(order.get(b.join(" > ").toLowerCase())??Number.MAX_SAFE_INTEGER)||a.join(" > ").localeCompare(b.join(" > ")))},[deferredCards,topicOrder,kind]);
   const allAuthors=useMemo(()=>kind==="paper"?canonicalAuthors(kindCards):[],[kind,kindCards]);
   const groupValues=useMemo(()=>kind!=="paper"?[]:groupBy==="status"?statuses:groupBy==="keyword"?allTags:groupBy==="author"?allAuthors:groupBy==="project"?Array.from(new Set(kindCards.filter(c=>projectPath.every((level,i)=>c.projects[i]===level)).map(c=>c.projects[projectPath.length]).filter(Boolean))).sort():[],[kind,groupBy,statuses,kindCards,projectPath,allTags,allAuthors]);
@@ -318,14 +344,15 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const keywordFacetCount=useCallback((value:string)=>facetCounts.keywordsMap.get(value)||0,[facetCounts]);
   const authorFacetCount=useCallback((value:string)=>facetCounts.authorsMap.get(singleAuthorIdentity(value))||0,[facetCounts]);
   const topicCount=useCallback((path:string[])=>(facetCounts.topicsMap.get(path.join(" > "))||0),[facetCounts]);
-  const collectionCounts=useMemo(()=>{const result={paper:0,author:0,journal:0};deferredCards.forEach(card=>{const cardKind=(card.kind||"paper") as "paper"|"author"|"journal"|"project",meta=cardMetadata.get(card.id)!;if(cardKind==="project")return;if(queryNeedle&&!meta.search.includes(queryNeedle))return;if(cardKind==="paper"&&duplicatesOnly&&(duplicateTitleCounts.get(meta.duplicateKey)||0)<2)return;result[cardKind]++});return result},[deferredCards,cardMetadata,queryNeedle,duplicatesOnly,duplicateTitleCounts]);
+  const collectionCounts=useMemo(()=>{const result={paper:0,author:0,journal:0};deferredCards.forEach(card=>{const cardKind=card.kind||"paper",meta=cardMetadata.get(card.id)!;if(cardKind!=="paper"&&cardKind!=="author"&&cardKind!=="journal")return;if(queryNeedle&&!meta.search.includes(queryNeedle))return;if(cardKind==="paper"&&duplicatesOnly&&(duplicateTitleCounts.get(meta.duplicateKey)||0)<2)return;result[cardKind]++});return result},[deferredCards,cardMetadata,queryNeedle,duplicatesOnly,duplicateTitleCounts]);
+  const displayedCardCount=collectionCounts.paper+collectionCounts.author+collectionCounts.journal;
   const projectCardsByPath=useMemo(()=>{const map=new Map<string,Card>();if(kind==="paper"&&groupBy==="project")deferredCards.forEach(card=>{if(card.kind==="project")map.set(card.projects.join(" > ")||card.title,card)});return map},[deferredCards,kind,groupBy]);
   const selectedProjectCard=useMemo(()=>projectCardsByPath.get(projectPath.join(" > "))||projectCardsByPath.get(projectPath.at(-1)||""),[projectCardsByPath,projectPath]);
   const topicTrail=useMemo(()=>projectPath.map((level,i)=>{const path=projectPath.slice(0,i+1);return {level,path,card:projectCardsByPath.get(path.join(" > "))||projectCardsByPath.get(level)}}),[projectCardsByPath,projectPath]);
 
   function change(fn:(cs:Card[])=>Card[],remember=true) { setCards(cs=>{if(remember){history.current.push(cs);future.current=[];if(history.current.length>30)history.current.shift()}return fn(cs)}); }
-  function commitOpenCard(card=pendingCard.current){if(editorCommitTimer.current){clearTimeout(editorCommitTimer.current);editorCommitTimer.current=null}if(!card)return;pendingCard.current=null;setCards(current=>current.map(item=>item.id===card.id?card:item));setOpen(current=>current?.id===card.id?card:current)}
-  function update(card: Card,immediate=false) { openCardRef.current=card;pendingCard.current=card;if(editorCommitTimer.current)clearTimeout(editorCommitTimer.current);if(immediate)commitOpenCard(card);else editorCommitTimer.current=setTimeout(()=>commitOpenCard(card),650); }
+  function commitOpenCard(card=pendingCard.current){if(editorCommitTimer.current){clearTimeout(editorCommitTimer.current);editorCommitTimer.current=null}if(!card)return;pendingCard.current=null;setCards(current=>{const index=current.findIndex(item=>item.id===card.id);if(index<0||current[index]===card)return current;const next=[...current];next[index]=card;return next});setOpen(current=>current?.id===card.id?card:current)}
+  function update(card: Card,immediate=false) {openCardRef.current=card;pendingCard.current=card;setSaved(false);if(editorCommitTimer.current)clearTimeout(editorCommitTimer.current);if(immediate)commitOpenCard(card);else editorCommitTimer.current=setTimeout(()=>commitOpenCard(card),EDITOR_IDLE_SAVE_MS)}
   function patchOpen(fields:Partial<Card>,immediate=false){const current=openCardRef.current;if(current)update({...current,...fields},immediate)}
   function openCard(card:Card){commitOpenCard();pendingCard.current=null;openCardRef.current=card;setOpen(card)}
   function closeCard(){commitOpenCard();openCardRef.current=null;setOpen(null)}
@@ -339,7 +366,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   function saveEditedValues(){if(!editingValues)return;const before=groupValues;const next=valueDraft.map(value=>value.trim());change(cs=>{const updated=cs.map(card=>{if(editingValues==="keyword"){return {...card,keywords:Array.from(new Set(card.keywords.map(keyword=>{const i=before.indexOf(keyword);return i<0?keyword:(next[i]||"")}).filter(Boolean)))}}if(!projectPath.every((level,i)=>card.projects[i]===level))return card;const old=card.projects[projectPath.length];const i=before.indexOf(old);if(i<0)return card;const projects=[...card.projects];if(next[i])projects[projectPath.length]=next[i];else projects.splice(projectPath.length,1);return {...card,projects,title:card.kind==="project"&&card.projects.length===projectPath.length+1?(next[i]||card.title):card.title}});if(editingValues!=="project")return updated;const additions=next.slice(before.length).filter(Boolean).filter(name=>!before.includes(name)).map((name,i)=>({...blank("project"),id:Date.now()+i,title:name,projects:[...projectPath,name].slice(0,5)}));return [...additions,...updated]});setEditingValues(null)}
   function addCategoryFromCard(card:Card){setNewCategoryName("");setAddingCategoryFor(card.id)}
   function saveNewCategory(){const category=newCategoryName.trim();const card=(open?.id===addingCategoryFor?open:null)||cards.find(c=>c.id===addingCategoryFor);if(!category||!card)return;const existing=statuses.find(s=>s.toLowerCase()===category.toLowerCase())||category;if(!statuses.some(s=>s.toLowerCase()===category.toLowerCase()))setStatuses(current=>[...current,category]);update(withCategories(card,[...cardCategories(card),existing]),true);setAddingCategoryFor(null);setNewCategoryName("")}
-  function toggleCategory(card:Card,category:string){const current=cardCategories(card),exists=current.some(value=>value.toLowerCase()===category.toLowerCase());update(withCategories(card,exists?current.filter(value=>value.toLowerCase()!==category.toLowerCase()):[...current,category]))}
+  function toggleCategory(card:Card,category:string){const current=cardCategories(card),exists=current.some(value=>value.toLowerCase()===category.toLowerCase());update(withCategories(card,exists?current.filter(value=>value.toLowerCase()!==category.toLowerCase()):[...current,category]),true)}
   function reorderTopic(source:string[],target:string[],placement:TopicDropPlacement){
     source=source.filter(Boolean).slice(0,5);target=target.filter(Boolean).slice(0,5);
     const same=(left:string[],right:string[])=>left.length===right.length&&left.every((level,index)=>level===right[index]);
@@ -368,7 +395,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     const additions=await Promise.all(Array.from(files).filter(f=>f.type.startsWith("image/")).map(file=>new Promise<{id:number;name:string;data:string}>((resolve,reject)=>{
       const reader=new FileReader(); reader.onerror=reject; reader.onload=()=>{const img=new Image(); img.onerror=reject; img.onload=()=>{const max=1600, scale=Math.min(1,max/Math.max(img.width,img.height)); const canvas=document.createElement("canvas"); canvas.width=Math.round(img.width*scale); canvas.height=Math.round(img.height*scale); canvas.getContext("2d")?.drawImage(img,0,0,canvas.width,canvas.height); resolve({id:Date.now()+Math.random(),name:file.name,data:canvas.toDataURL("image/jpeg",.82)})}; img.src=String(reader.result)}; reader.readAsDataURL(file)
     })));
-    const current=openCardRef.current;if(current&&additions.length) update({...current,images:[...(current.images||[]),...additions]});
+    const current=openCardRef.current;if(current&&additions.length) update({...current,images:[...(current.images||[]),...additions]},true);
   }
   useEffect(()=>{const paste=(event:ClipboardEvent)=>{if(!openCardRef.current)return;const images=Array.from(event.clipboardData?.files||[]).filter(file=>file.type.startsWith("image/"));if(!images.length)return;event.preventDefault();const transfer=new DataTransfer();images.forEach(file=>transfer.items.add(file));attachImages(transfer.files)};window.addEventListener("paste",paste);return()=>window.removeEventListener("paste",paste)},[]);
   function download(kind: "json"|"csv"|"md"|"doc", suppliedBody="") {
@@ -401,7 +428,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
 
   return <main className="app-shell">
     <header className="topbar">
-      <div className="brand"><span className="brand-mark">L</span><div><h1>The Literature Box</h1><p>{cards.length} cards · stored on this device</p></div></div>
+      <div className="brand"><span className="brand-mark">L</span><div><h1>The Literature Box</h1><p>{displayedCardCount} cards · stored on this device</p></div></div>
       <div className="top-actions">
         <label className="import-btn">↥ Import<input type="file" accept=".json" onChange={e => e.target.files?.[0] && importJson(e.target.files[0])}/></label>
         <details className="export-menu"><summary>↓ Export</summary><div><button onClick={exportPdf}>PDF by topic</button><button onClick={exportWord}>Word by topic</button><button onClick={()=>download("md")}>Markdown</button><button onClick={()=>download("csv")}>CSV</button><button onClick={()=>download("json")}>JSON backup</button></div></details>
@@ -454,7 +481,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
 
     {open && <div className="modal-backdrop" onClick={e=>{if(e.target===e.currentTarget)closeCard()}}><section key={open.id} className="card-modal" role="dialog" aria-modal="true">
       <div className="modal-top"><span className="catalog-label">{open.kind==="project"?"TOPIC":(open.kind||"paper").toUpperCase()} CARD · {open.year || "UNDATED"}</span><button aria-label="Close card" onClick={closeCard}>×</button></div>
-      {(open.kind||"paper")==="paper"&&<CitationImporter onIdentify={fields=>patchOpen(Object.fromEntries(Object.entries(fields).filter(([,value])=>value)))}/>}
+      {(open.kind||"paper")==="paper"&&<CitationImporter onIdentify={fields=>patchOpen(Object.fromEntries(Object.entries(fields).filter(([,value])=>value)),true)}/>}
       <DraftInput className="title-input" value={open.title} onCommit={title=>patchOpen({title})}/>
       {open.kind!=="project"&&<div className="field-row"><label>{(open.kind||"paper")==="paper"?"Authors":(open.kind==="author"?"Affiliation":"Publisher")}<DraftInput value={open.authors} placeholder={(open.kind||"paper")==="paper"?"Lastname, Firstname; or Firstname Lastname":""} onCommit={authors=>patchOpen({authors})}/>{(open.kind||"paper")==="paper"&&<small className="field-help">Either name order works. Separate multiple authors with semicolons.</small>}</label><label className="year-field">{open.kind==="author"?"Years":"Year"}<DraftInput value={open.year} onCommit={year=>patchOpen({year})}/></label></div>}
       {open.kind!=="project"&&<div className="field-row"><label>{(open.kind||"paper")==="paper"?"Journal":open.kind==="author"?"Department / field":"Frequency / location"}<DraftInput value={open.journal} onCommit={journal=>patchOpen({journal})}/></label>{(open.kind||"paper")==="paper"&&<label>DOI<div className="doi-field"><DraftInput value={open.doi} onCommit={doi=>patchOpen({doi})}/>{open.doi&&<a href={`https://doi.org/${open.doi.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i,"")}`} target="_blank" rel="noreferrer">Open ↗</a>}</div></label>}</div>}
@@ -463,12 +490,12 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
       {(open.kind||"paper")==="paper"&&<div className="field-row"><ProjectField values={open.projects} suggestions={existingTopicPaths} onChange={projects=>patchOpen({projects})}/><div className="category-picker"><span className="category-picker-title">Categories</span><div className="category-options">{statuses.map(category=>{const active=cardCategories(open).some(value=>value.toLowerCase()===category.toLowerCase());return <button type="button" key={category} className={active?"active":""} aria-pressed={active} onClick={()=>toggleCategory(open,category)}>{active?"✓ ":"＋ "}{category}</button>})}{!statuses.length&&<small>No categories yet.</small>}</div><button type="button" className="new-category-button" onClick={()=>addCategoryFromCard(open)}>＋ New category</button></div></div>}
       <RichField label={(open.kind||"paper")==="paper"?"Key findings":open.kind==="author"?"Profile":open.kind==="project"?"Topic introduction":"Journal overview"} value={open.findings} onChange={findings=>patchOpen({findings})}/>
       <div className="attachments findings-images"><div className="attachment-head"><span>Images · paste anywhere with Ctrl/⌘ + V</span><label className="attach-button">＋ Attach images<input type="file" accept="image/*" multiple onChange={e=>e.target.files&&attachImages(e.target.files)}/></label></div>
-        {open.images?.length ? <div className="image-grid">{open.images.map(image=><figure key={image.id}><img className="zoomable-image" src={image.data} alt={image.name} title="Click to enlarge" onClick={()=>setPreviewImage(image)}/><figcaption title={image.name}>{image.name}</figcaption><button aria-label={`Remove ${image.name}`} onClick={()=>patchOpen({images:(openCardRef.current?.images||[]).filter(item=>item.id!==image.id)})}>×</button></figure>)}</div> : <p className="attachment-empty">Add figures, diagrams, screenshots, or handwritten notes.</p>}
+        {open.images?.length ? <div className="image-grid">{open.images.map(image=><figure key={image.id}><img className="zoomable-image" src={image.data} alt={image.name} title="Click to enlarge" onClick={()=>setPreviewImage(image)}/><figcaption title={image.name}>{image.name}</figcaption><button aria-label={`Remove ${image.name}`} onClick={()=>patchOpen({images:(openCardRef.current?.images||[]).filter(item=>item.id!==image.id)},true)}>×</button></figure>)}</div> : <p className="attachment-empty">Add figures, diagrams, screenshots, or handwritten notes.</p>}
       </div>
       {open.kind!=="project"&&<div className="field-row"><label>{(open.kind||"paper")==="paper"?"Methods":open.kind==="author"?"Approach / traditions":"Scope"}<DraftTextarea value={open.methods} onKeyDown={allowTab} onCommit={methods=>patchOpen({methods})}/></label><label>{(open.kind||"paper")==="paper"?"Limitations":open.kind==="author"?"Cautions / critiques":"Submission notes"}<DraftTextarea value={open.limitations} onKeyDown={allowTab} onCommit={limitations=>patchOpen({limitations})}/></label></div>}
       <RichField label="My notes" value={open.notes} onChange={notes=>patchOpen({notes})}/>
       {open.kind!=="project"&&<label>PDF or EndNote link<DraftInput value={open.link} placeholder="https://…" onCommit={link=>patchOpen({link})}/></label>}
-      <div className="modal-foot"><button className="delete" onClick={()=>{if(confirm("Remove this card?"))removeOpenCard()}}>Remove card</button><span>Changes save automatically</span><button className="done" onClick={closeCard}>Done</button></div>
+      <div className="modal-foot"><button className="delete" onClick={()=>{if(confirm("Remove this card?"))removeOpenCard()}}>Remove card</button><span>Autosaves after 10 seconds idle · Ctrl/⌘ + S saves now</span><button className="done" onClick={closeCard}>Done</button></div>
     </section></div>}
     {editingStatuses&&<div className="modal-backdrop"><section className="status-editor" role="dialog" aria-modal="true"><div className="modal-top"><div><span className="catalog-label">CARD CATEGORIES</span><h2>Edit categories</h2></div><button aria-label="Close" onClick={()=>setEditingStatuses(false)}>×</button></div><p>Add as many categories as you need. Their order becomes the tab order.</p><div className="status-fields">{statusDraft.map((status,i)=><div key={i}><span>{i+1}</span><input value={status} autoFocus={i===0} onChange={e=>setStatusDraft(ds=>ds.map((d,n)=>n===i?e.target.value:d))}/><button aria-label={`Remove ${status}`} onClick={()=>setStatusDraft(ds=>ds.map((value,n)=>n===i?"":value))}>×</button></div>)}</div><button className="add-status" onClick={()=>setStatusDraft(ds=>[...ds,`Category ${ds.length+1}`])}>＋ Add category</button><div className="modal-foot"><button onClick={()=>setEditingStatuses(false)}>Cancel</button><span>{statusDraft.length} categories</span><button className="done" onClick={()=>{const draft=statusDraft.map(value=>value.trim());const next=Array.from(new Set(draft.filter(Boolean)));setCards(cs=>cs.map(card=>withCategories(card,cardCategories(card).map(category=>{const index=statuses.findIndex(value=>value.toLowerCase()===category.toLowerCase());return index>=0?(draft[index]||""):category}).filter(Boolean))));setStatuses(next);selectFilter("All cards");setEditingStatuses(false)}}>Save categories</button></div></section></div>}
     {editingValues&&<div className="modal-backdrop"><section className="status-editor" role="dialog" aria-modal="true"><div className="modal-top"><div><span className="catalog-label">{editingValues==="project"?"TOPIC LEVEL":"KEYWORDS"}</span><h2>Edit {editingValues==="project"?"topics":"keywords"}</h2></div><button aria-label="Close" onClick={()=>setEditingValues(null)}>×</button></div><p>{editingValues==="project"?(projectPath.length?`Manage subtopics under ${projectPath.at(-1)}.`:"Manage top-level topics."):"Rename an item below, or remove it from every card."}</p><div className="status-fields">{valueDraft.map((value,i)=><div key={i}><span>{i+1}</span><input value={value} autoFocus={i===0} placeholder={editingValues==="project"?"Topic name":"Keyword"} onChange={e=>setValueDraft(values=>values.map((item,n)=>n===i?e.target.value:item))}/><button aria-label={`Remove ${value}`} onClick={()=>setValueDraft(values=>values.map((item,n)=>n===i?"":item))}>×</button></div>)}</div>{editingValues==="project"&&projectPath.length<5&&<button className="add-status" onClick={()=>setValueDraft(values=>[...values,""])}>＋ Add topic here</button>}<div className="modal-foot"><button onClick={()=>setEditingValues(null)}>Cancel</button><span>{editingValues==="project"?"Maximum five levels":"Applies to all matching cards"}</span><button className="done" onClick={saveEditedValues}>Save changes</button></div></section></div>}
