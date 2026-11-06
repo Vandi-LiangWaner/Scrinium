@@ -8,9 +8,14 @@ type LibraryState = {
   collectionCategories?: object;
 };
 
+function withDrafts<State extends LibraryState>(state: State, drafts: Map<number, State["cards"][number]>): State {
+  if (!drafts.size) return state;
+  return { ...state, cards: state.cards.map(card => drafts.get(card.id) ?? card) };
+}
+
 // Keep the existing snapshot format. Ordinary edits can send a small patch
 // through IPC without copying figures or serializing the entire library.
-function cardPatch(before: LibraryState, after: LibraryState): CardPatch | null {
+function cardPatch(before: LibraryState, after: LibraryState): CardPatch | null | undefined {
   if (before.statuses !== after.statuses || before.topicOrder !== after.topicOrder ||
       before.collectionCategories !== after.collectionCategories ||
       before.cards.length !== after.cards.length) return null;
@@ -26,7 +31,7 @@ function cardPatch(before: LibraryState, after: LibraryState): CardPatch | null 
         Object.values(fields).some(value => value === undefined)) return null;
     if (Object.keys(fields).length) patch = { index, id: card.id, fields };
   }
-  return patch;
+  return patch ?? undefined;
 }
 
 async function stringifyOffThread(state: LibraryState): Promise<string> {
@@ -57,10 +62,15 @@ export function useLibrarySave<State extends LibraryState>(
   saveBrowserState: (state: State) => Promise<void>,
 ) {
   const [status, setStatus] = useState<"loading" | "saved" | "saving" | "error">("loading");
+  const library = useRef<State | null>(null);
+  const drafts = useRef(new Map<number, State["cards"][number]>());
   const latest = useRef<State | null>(null);
   const saved = useRef<State | null>(null);
   const inFlight = useRef<Promise<boolean> | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveNow = useCallback(() => {
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = null;
     if (inFlight.current) return inFlight.current;
     if (latest.current === saved.current) return Promise.resolve(true);
     setStatus("saving");
@@ -70,10 +80,12 @@ export function useLibrarySave<State extends LibraryState>(
           const next = latest.current;
           const desktop = window.literatureBox;
           if (desktop) {
-            const patch = saved.current && cardPatch(saved.current, next);
-            const patched = patch && await desktop.patchCard(patch);
-            if (!patched && !await desktop.saveCards(await stringifyOffThread(next))) {
-              throw new Error("The desktop database did not acknowledge the save.");
+            const patch = saved.current ? cardPatch(saved.current, next) : null;
+            if (patch !== undefined) {
+              const patched = patch && await desktop.patchCard(patch);
+              if (!patched && !await desktop.saveCards(await stringifyOffThread(next))) {
+                throw new Error("The desktop database did not acknowledge the save.");
+              }
             }
           } else {
             await saveBrowserState(next);
@@ -92,16 +104,41 @@ export function useLibrarySave<State extends LibraryState>(
     return inFlight.current;
   }, [saveBrowserState]);
 
+  const schedule = useCallback(() => {
+    if (timer.current !== null) clearTimeout(timer.current);
+    setStatus("saving");
+    timer.current = setTimeout(() => void saveNow(), 120);
+  }, [saveNow]);
+
+  // Autosave the open card without replacing the collection being rendered.
+  // Publish the draft to the deck when the editor is left or explicitly saved.
+  const stageCard = useCallback((card: State["cards"][number]) => {
+    if (!library.current) return;
+    drafts.current.set(card.id, card);
+    latest.current = withDrafts(library.current, drafts.current);
+    schedule();
+  }, [schedule]);
+  const stagedCard = useCallback((id: number) => drafts.current.get(id), []);
+  const discardStagedCards = useCallback((id?: number) => {
+    if (id === undefined) drafts.current.clear();
+    else drafts.current.delete(id);
+  }, []);
+
   useLayoutEffect(() => {
-    if (ready) latest.current = state;
+    if (!ready) return;
+    library.current = state;
+    if (drafts.current.size) {
+      for (const card of state.cards) if (drafts.current.get(card.id) === card) drafts.current.delete(card.id);
+    }
+    latest.current = withDrafts(state, drafts.current);
   }, [state, ready]);
 
   useEffect(() => {
-    if (!ready) return;
-    setStatus("saving");
-    const timer = setTimeout(() => void saveNow(), 120);
-    return () => clearTimeout(timer);
-  }, [state, ready, saveNow]);
+    if (ready) schedule();
+  }, [state, ready, schedule]);
+  useEffect(() => () => {
+    if (timer.current !== null) clearTimeout(timer.current);
+  }, []);
 
-  return { status, saveNow, hasUnsaved: useCallback(() => latest.current !== saved.current, []) };
+  return { status, saveNow, stageCard, stagedCard, discardStagedCards, hasUnsaved: useCallback(() => latest.current !== saved.current, []) };
 }

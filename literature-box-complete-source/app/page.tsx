@@ -1,12 +1,12 @@
 "use client";
 
-import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
-import { flushSync } from "react-dom";
+import { memo, startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
 import { FigureGrid, FigureLightbox, type Figure } from "./figures";
 import { FlipButton, FLIP_INTERVAL_MS } from "./flip-button";
 import { useLibrarySave } from "./library-save";
 import { CardLinkPicker, RichField } from "./rich-field";
 import { inlineCardIds, linkedCardId, remapInlineLinks, safeRichHtml, type LinkableCard } from "./rich-text";
+import { displayName } from "../package.json";
 
 const collectionLabels = { paper: "Papers", author: "Authors", journal: "Journals", note: "Notes" };
 type Collection = keyof typeof collectionLabels;
@@ -40,8 +40,9 @@ const seed: Card[] = [
 ];
 
 const defaultStatuses = ["To read", "Reading", "Read", "Annotated"];
-const EDITOR_IDLE_SAVE_MS = 500;
-const EDITOR_MAX_SAVE_MS = 2_000;
+const AUTOSAVE_INTERVAL_MS = 5 * 60_000;
+const AUTOSAVE_IDLE_MS = 1_200;
+const afterPaint = () => new Promise<void>(resolve => setTimeout(resolve, 32));
 const blank = (kind:NonNullable<Card["kind"]>): Card => ({ id: Date.now(), createdAt:Date.now(), kind, title: kind==="paper"?"Untitled paper":kind==="author"?"Unnamed author":kind==="journal"?"Untitled journal":kind==="project"?"Untitled project":kind==="note"?"Untitled note":"Untitled topic", authors: "", year: "", journal: "", doi: "", topics: [], keywords: [], projects: [], status: "", categories:[], findings: "", methods: "", limitations: "", notes: "", link: "", subtopics:[] });
 const split = (s: string) => s.split(",").map(x => x.trim()).filter(Boolean);
 const plain = (s:string) => s.replace(/\r?\n|\t/g," ").replace(/<\s*br\s*\/?\s*>/gi,"\n").replace(/<\/(?:p|div|li)>/gi,"\n").replace(/<li[^>]*>/gi,"• ").replace(/<[^>]*>/g,"").replace(/&nbsp;/g," ").replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/\n{3,}/g,"\n\n").trim();
@@ -100,8 +101,12 @@ function HighlightText({text,term}:{text:string;term:string}){
   const parts=text.split(new RegExp(`(${escaped})`,"gi"));
   return <>{parts.map((part,i)=>i%2?<mark className="search-highlight" key={i}>{part}</mark>:part)}</>;
 }
-function RichPreview({html,term="",className="",onOpenCard}:{html:string;term?:string;className?:string;onOpenCard?:(id:number)=>void}) {
-  const rendered = safeRichHtml(html, term);
+const RichPreview = memo(function RichPreview({html,term="",className="",onOpenCard,compact=false}:{html:string;term?:string;className?:string;onOpenCard?:(id:number)=>void;compact?:boolean}) {
+  // A compact card can show only a few lines. Keep long documents out of
+  // the preview DOM until the user expands or opens the card.
+  const content = compact && html.length > 6_000
+    ? html.slice(0, 6_000).replace(/<[^>]*$|&[a-zA-Z0-9#]*$/g, "") : html;
+  const rendered = safeRichHtml(content, term);
   return <div className={className} dangerouslySetInnerHTML={{__html:rendered}} onClick={event => {
     const href = (event.target as HTMLElement).closest("a")?.getAttribute("href");
     if (!href) return;
@@ -109,7 +114,7 @@ function RichPreview({html,term="",className="",onOpenCard}:{html:string;term?:s
     const id = linkedCardId(href);
     if (id !== null) { event.preventDefault(); onOpenCard?.(id); }
   }}/>;
-}
+});
 function searchExcerpt(text:string,term:string){const needle=term.trim().toLowerCase();const index=text.toLowerCase().indexOf(needle);if(index<0)return text;const start=Math.max(0,index-58),end=Math.min(text.length,index+needle.length+82);return `${start?"…":""}${text.slice(start,end).trim()}${end<text.length?"…":""}`}
 const citationSentences=(value:string)=>value.split(/(?<=[.!?])\s+(?=[A-Z0-9“"'(])/u).map(part=>part.trim()).filter(Boolean);
 const cleanCitationField=(value:string)=>value.replace(/^[\s.,;:()[\]]+|[\s.,;:()[\]]+$/g,"").trim();
@@ -338,43 +343,62 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const openCardRef=useRef<Card|null>(null);
   const editorCommitTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
   const draftStarted = useRef(0);
+  const closingSave = useRef<Promise<boolean> | null>(null);
+  const closingDrafts = useRef(new Map<number, () => Card>());
   const pendingRich = useRef<Partial<Record<"findings" | "notes", () => string>>>({});
   const library = useMemo(() => ({ cards, statuses, topicOrder, collectionCategories }), [cards, statuses, topicOrder, collectionCategories]);
-  const { status: saveStatus, saveNow, hasUnsaved } = useLibrarySave(library, ready, saveBrowserState);
-  const commitOpenCard = useCallback(() => {
+  const { status: saveStatus, saveNow, stageCard, stagedCard, discardStagedCards, hasUnsaved } = useLibrarySave(library, ready, saveBrowserState);
+  const takeDraft = useCallback(() => {
     if (editorCommitTimer.current) clearTimeout(editorCommitTimer.current);
     editorCommitTimer.current = null;
     draftStarted.current = 0;
-    let draft = pendingCard.current;
-    const current = openCardRef.current;
+    const draft = pendingCard.current;
+    const card = draft || openCardRef.current;
     const { findings, notes } = pendingRich.current;
-    if (current && (findings || notes)) {
-      draft = { ...(draft || current), ...(findings && { findings: findings() }), ...(notes && { notes: notes() }) };
-    }
     pendingCard.current = null;
     pendingRich.current = {};
     setHasDraft(false);
-    if (!draft) return;
-    const card = draft;
-    openCardRef.current = card;
-    setCards(current => {
+    if (!card || !(draft || findings || notes)) return undefined;
+    return () => findings || notes
+      ? { ...card, ...(findings && { findings: findings() }), ...(notes && { notes: notes() }) }
+      : card;
+  }, []);
+  const publishCard = useCallback((card: Card) => {
+    stageCard(card);
+    startTransition(() => setCards(current => {
       const index = current.findIndex(item => item.id === card.id);
       if (index < 0 || current[index] === card) return current;
       const next = [...current];
       next[index] = card;
       return next;
-    });
+    }));
+  }, [stageCard]);
+  const commitOpenCard = useCallback(() => {
+    const read = takeDraft();
+    if (!read) return;
+    const card = read();
+    openCardRef.current = card;
     setOpen(current => current?.id === card.id ? card : current);
-  }, []);
-  const flushAndSave = useCallback(() => {
-    flushSync(commitOpenCard);
+    stageCard(card);
+  }, [takeDraft, stageCard]);
+  const publishOpenCard = useCallback(() => {
+    commitOpenCard();
+    const current = openCardRef.current;
+    const staged = current && stagedCard(current.id);
+    if (staged) publishCard(staged);
+  }, [commitOpenCard, stagedCard, publishCard]);
+  const flushAndSave = useCallback(async () => {
+    if (closingSave.current) await closingSave.current;
+    await afterPaint();
+    commitOpenCard();
     return saveNow();
   }, [commitOpenCard, saveNow]);
   const scheduleOpenCommit = useCallback(() => {
-    if (!draftStarted.current) { draftStarted.current = Date.now(); setHasDraft(true); }
+    const now = Date.now();
+    if (!draftStarted.current) { draftStarted.current = now; setHasDraft(true); }
     if (editorCommitTimer.current) clearTimeout(editorCommitTimer.current);
-    const remaining = Math.max(0, EDITOR_MAX_SAVE_MS - (Date.now() - draftStarted.current));
-    editorCommitTimer.current = setTimeout(commitOpenCard, Math.min(EDITOR_IDLE_SAVE_MS, remaining));
+    const remaining = AUTOSAVE_INTERVAL_MS - (now - draftStarted.current);
+    editorCommitTimer.current = setTimeout(commitOpenCard, Math.max(AUTOSAVE_IDLE_MS, remaining));
   }, [commitOpenCard]);
   const draftRich = useCallback((field: "findings" | "notes", read: () => string) => {
     pendingRich.current[field] = read;
@@ -389,7 +413,8 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     let cancelled = false;
     const load = async () => {
       try {
-        const raw = window.literatureBox ? await window.literatureBox.loadCards() : await loadBrowserState();
+        const storedValue = window.literatureBox ? await window.literatureBox.loadCards() : await loadBrowserState();
+        const raw = typeof storedValue === "string" ? JSON.parse(storedValue) : storedValue;
         if (cancelled) return;
         const savedLibrary = (Array.isArray(raw) ? { cards: raw } : raw) as Partial<LibraryState> | null;
         if (Array.isArray(savedLibrary?.statuses)) setStatuses(savedLibrary.statuses);
@@ -431,7 +456,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   useEffect(() => {
     if (window.literatureBox) return window.literatureBox.onCloseRequested(flushAndSave);
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (!pendingCard.current && !draftStarted.current && !hasUnsaved()) return;
+      if (!pendingCard.current && !draftStarted.current && !closingSave.current && !hasUnsaved()) return;
       event.preventDefault();
       event.returnValue = true;
     };
@@ -541,34 +566,51 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const linkedCardsById = useMemo(() => new Map(linkableCards.map(card => [card.id, card])), [linkableCards]);
   const noteLinks = useMemo(() => open?.kind === "note" ? Array.from(new Set([
     ...(open.relatedCardIds || []), ...inlineCardIds(open.notes),
-  ])) : [], [open]);
+  ])) : [], [open?.kind, open?.relatedCardIds, open?.notes]);
   const galleryCard = figurePreview && (open?.id === figurePreview.cardId ? open : cards.find(card => card.id === figurePreview.cardId));
   const statusText = loadError ? "Could not load library" : saveStatus === "loading" ? "Loading library…" : saveStatus === "error" ? "Save failed" :
-    hasDraft || saveStatus === "saving" ? "○ Saving…" : "● Saved locally";
+    saveStatus === "saving" ? "○ Saving…" : hasDraft ? "○ Unsaved changes" : "● Saved locally";
   const topicTrail=useMemo(()=>projectPath.map((level,i)=>{const path=projectPath.slice(0,i+1);return {level,path,card:projectCardsByPath.get(path.join(" > "))||projectCardsByPath.get(level)}}),[projectCardsByPath,projectPath]);
 
   function change(fn:(cs:Card[])=>Card[],remember=true) { setCards(cs=>{if(remember){history.current.push(cs);future.current=[];if(history.current.length>30)history.current.shift()}return fn(cs)}); }
   function update(card: Card, immediate = false) {
     openCardRef.current = card;
     pendingCard.current = card;
-    if (immediate) commitOpenCard();
-    else scheduleOpenCommit();
+    if (immediate) setOpen(card);
+    scheduleOpenCommit();
   }
   function patchOpen(fields: Partial<Card>, immediate = false) {
     const current = openCardRef.current;
     if (current && Object.entries(fields).some(([key, value]) => current[key as keyof Card] !== value)) {
       update({ ...current, ...fields }, immediate);
-    } else if (immediate && pendingCard.current) commitOpenCard();
+    } else if (immediate && pendingCard.current) setOpen(current);
   }
-  function openCard(card: Card) {
+  const openCard = useCallback((card: Card) => {
     if (openCardRef.current?.id === card.id) return;
-    commitOpenCard();
-    openCardRef.current = card;
-    setOpen(card);
-  }
+    publishOpenCard();
+    const current = closingDrafts.current.get(card.id)?.() || stagedCard(card.id) || card;
+    openCardRef.current = current;
+    setOpen(current);
+  }, [publishOpenCard, stagedCard]);
   function closeCard() {
-    void flushAndSave();
-    const note = cards.find(card => card.id === returnToNote);
+    const id = openCardRef.current?.id;
+    const read = takeDraft();
+    const staged = id === undefined ? undefined : stagedCard(id);
+    if (id !== undefined && (read || staged)) {
+      let captured: Card | undefined;
+      const capture = () => captured ??= read ? read() : staged!;
+      closingDrafts.current.set(id, capture);
+      const previous = closingSave.current;
+      const work = (previous || Promise.resolve(true)).then(afterPaint).then(() => {
+        publishCard(capture());
+        if (closingDrafts.current.get(id) === capture) closingDrafts.current.delete(id);
+        return saveNow();
+      });
+      closingSave.current = work;
+      void work.finally(() => { if (closingSave.current === work) closingSave.current = null; });
+    }
+    const note = returnToNote === null ? null :
+      closingDrafts.current.get(returnToNote)?.() || stagedCard(returnToNote) || cards.find(card => card.id === returnToNote);
     openCardRef.current = note || null;
     setOpen(note || null);
     setReturnToNote(null);
@@ -579,6 +621,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     editorCommitTimer.current = null;
     pendingCard.current = null;
     pendingRich.current = {};
+    discardStagedCards(open.id);
     draftStarted.current = 0;
     setHasDraft(false);
     setCards(current => current.filter(card => card.id !== open.id));
@@ -588,7 +631,8 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     setReturnToNote(null);
   }
   function restoreOpen(snapshot: Card[]) {
-    commitOpenCard();
+    takeDraft();
+    discardStagedCards();
     if (!openCardRef.current) return;
     openCardRef.current = snapshot.find(card => card.id === openCardRef.current?.id) || null;
     setOpen(openCardRef.current);
@@ -597,7 +641,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   function redo(){const next=future.current.pop();if(next){restoreOpen(next);setCards(current=>{history.current.push(current);return next})}}
   function addCard() {
     if (!ready) return;
-    commitOpenCard();
+    publishOpenCard();
     setReturnToNote(null);
     const card = blank(kind);
     setCards(current => {
@@ -607,15 +651,15 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     openCardRef.current = card;
     setOpen(card);
   }
-  function openLinkedCard(id: number) {
+  const openLinkedCard = useCallback((id: number) => {
     const target = cards.find(card => card.id === id);
     if (!target) { alert("This linked card is unavailable."); return; }
     const current = openCardRef.current;
     if (current?.kind === "note") setReturnToNote(current.id);
     openCard(target);
-  }
+  }, [cards, openCard]);
   function showFigure(cardId: number, imageId: number) {
-    commitOpenCard();
+    if (pendingCard.current) setOpen(pendingCard.current);
     setFigurePreview({ cardId, imageId });
   }
   function moveFigure(sourceId: number, targetId: number) {
@@ -632,7 +676,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   function captionFigure(id: number, caption: string, immediate?: boolean) {
     const figures = openCardRef.current?.images || [];
     if ((figures.find(figure => figure.id === id)?.caption || "") === caption) {
-      if (immediate && pendingCard.current) commitOpenCard();
+      if (immediate && pendingCard.current) setOpen(pendingCard.current);
       return;
     }
     patchOpen({ images: figures.map(figure => figure.id === id ? { ...figure, caption } : figure) }, immediate);
@@ -716,9 +760,30 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   async function attachImages(files: FileList) {
     const cardId = openCardRef.current?.id;
     if (cardId === undefined) return;
-    const results=await Promise.allSettled(Array.from(files).filter(f=>f.type.startsWith("image/")).map(file=>new Promise<{id:number;name:string;data:string}>((resolve,reject)=>{
-      const reader=new FileReader(); reader.onerror=reject; reader.onload=()=>{const img=new Image(); img.onerror=reject; img.onload=()=>{const max=1600, scale=Math.min(1,max/Math.max(img.width,img.height)); const canvas=document.createElement("canvas"); canvas.width=Math.round(img.width*scale); canvas.height=Math.round(img.height*scale); canvas.getContext("2d")?.drawImage(img,0,0,canvas.width,canvas.height); resolve({id:Date.now()+Math.random(),name:file.name,data:canvas.toDataURL("image/jpeg",.82)})}; img.src=String(reader.result)}; reader.readAsDataURL(file)
-    })));
+    const results = await Promise.allSettled(Array.from(files).filter(file => file.type.startsWith("image/")).map(async (file): Promise<Figure> => {
+      const url = URL.createObjectURL(file);
+      try {
+        const image = new Image();
+        image.src = url;
+        await image.decode();
+        const scale = Math.min(1, 1600 / Math.max(image.width, image.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(
+          value => value ? resolve(value) : reject(new Error("Could not encode figure")), "image/jpeg", .82));
+        const data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onerror = reject;
+          reader.onload = () => resolve(String(reader.result));
+          reader.readAsDataURL(blob);
+        });
+        return { id: Date.now() + Math.random(), name: file.name, data };
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    }));
     const additions = results.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
     if (results.some(result => result.status === "rejected")) alert("Some figures could not be read.");
     if (!additions.length) return;
@@ -740,7 +805,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     const body=JSON.stringify({ version: 3, ...library },null,2);
     if(window.literatureBox){const saved=await window.literatureBox.exportFile("json",body);if(saved===false)return}
     else{const a=document.createElement("a");const url=URL.createObjectURL(new Blob([body],{type:"application/json"}));a.href=url;a.download="literature-box-before-delete.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
-    if(editorCommitTimer.current)clearTimeout(editorCommitTimer.current);editorCommitTimer.current=null;pendingCard.current=null;pendingRich.current={};draftStarted.current=0;setHasDraft(false);openCardRef.current=null;setReturnToNote(null);history.current.push(cards);future.current=[];setCards([]);setOpen(null);setPosition(0);setFilter("All cards");setProjectPath([]);setTopicOrder([]);setClearingAll(false);setClearConfirmation("");
+    if(editorCommitTimer.current)clearTimeout(editorCommitTimer.current);editorCommitTimer.current=null;pendingCard.current=null;pendingRich.current={};discardStagedCards();draftStarted.current=0;setHasDraft(false);openCardRef.current=null;setReturnToNote(null);history.current.push(cards);future.current=[];setCards([]);setOpen(null);setPosition(0);setFilter("All cards");setProjectPath([]);setTopicOrder([]);setClearingAll(false);setClearConfirmation("");
   }
   function topicDocumentContent(){
     const papers=cards.filter(c=>(c.kind||"paper")==="paper").sort((a,b)=>(a.projects.join(" > ")||"Unfiled").localeCompare(b.projects.join(" > ")||"Unfiled")||a.title.localeCompare(b.title));
@@ -801,7 +866,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
 
   return <main className="app-shell">
     <header className="topbar">
-      <div className="brand"><span className="brand-mark">L</span><div><h1>The Literature Box</h1><p>{displayedCardCount} cards · stored on this device</p></div></div>
+      <div className="brand"><span className="brand-mark">L</span><div><h1>{displayName}</h1><p>{displayedCardCount} cards · stored on this device</p></div></div>
       <div className="top-actions">
         <label className="import-btn">↥ Import<input type="file" accept=".json" onChange={e => e.target.files?.[0] && importJson(e.target.files[0])}/></label>
         <details className="export-menu"><summary>↓ Export</summary><div><button onClick={exportPdf}>PDF by topic</button><button onClick={exportWord}>Word by topic</button><button onClick={()=>download("md")}>Markdown</button><button onClick={()=>download("csv")}>CSV</button><button onClick={()=>download("json")}>JSON backup</button></div></details>
@@ -857,7 +922,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
           <div className="card-number" aria-live="polite">{String(boundedPosition+1).padStart(2,"0")} / {String(deckItems.length).padStart(2,"0")}</div>{kind==="paper"?<span className={`status-dot ${cardCategories(currentItem.card)[0]?.toLowerCase().replace(" ","-")||"uncategorized"}`}>{cardCategories(currentItem.card).join(" · ")||"Uncategorized"}</span>:<span className="status-dot">{cardCategories(currentItem.card).join(" · ") || kind}</span>}{(duplicateTitleCounts.get(duplicateTitleKey(currentItem.card))||0)>1&&<span className="duplicate-mark" title="Another paper card has the same title">Duplicate title ×{duplicateTitleCounts.get(duplicateTitleKey(currentItem.card))}</span>}
           {(()=>{const current=currentItem.card;const matchedDetails=deferredQuery.trim()?[['Methods',current.methods],['Limitations',current.limitations],['My notes',plain(current.notes)]].filter(([,text])=>text.toLowerCase().includes(deferredQuery.trim().toLowerCase())).map(([label,text])=>[label,searchExcerpt(text,deferredQuery)]):[];return <>
           <h2><HighlightText text={current.title} term={deferredQuery}/></h2>{kind !== "note" && <><p className="citation"><HighlightText text={kind==="paper"?firstAuthor(current.authors):current.authors} term={deferredQuery}/>{current.year&&<> · <HighlightText text={current.year} term={deferredQuery}/></>}</p><p className="journal"><HighlightText text={current.journal} term={deferredQuery}/>{current.doi&&<> · <a href={`https://doi.org/${current.doi.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i,"")}`} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()}>DOI</a></>}</p></>}{kind === "journal" && <JournalSummary card={current} term={deferredQuery}/>}<div className="rule"/>
-          <RichPreview className="finding rich-preview" html={kind === "note" ? current.notes : current.findings} term={deferredQuery} onOpenCard={openLinkedCard}/>{previewExpanded && kind !== "note" &&<div className="preview-details">{current.methods&&<p><b>Methods:</b> <HighlightText text={current.methods} term={deferredQuery}/></p>}{current.limitations&&<p><b>Limitations:</b> <HighlightText text={current.limitations} term={deferredQuery}/></p>}{plain(current.notes)&&<div className="preview-rich-row"><b>My notes:</b><RichPreview className="rich-preview compact" html={current.notes} term={deferredQuery} onOpenCard={openLinkedCard}/></div>}</div>}{kind !== "note" && !previewExpanded&&matchedDetails.length>0&&<div className="search-matches">{matchedDetails.map(([label,text])=><p key={label}><b>{label}</b><span><HighlightText text={text} term={deferredQuery}/></span></p>)}</div>}<div className="tags">{current.keywords.slice(0,previewExpanded?12:4).map(t=><button key={t} onClick={e=>{e.stopPropagation();searchCards(t)}}><HighlightText text={t} term={deferredQuery}/></button>)}</div>
+          <RichPreview className="finding rich-preview" html={kind === "note" ? current.notes : current.findings} term={deferredQuery} onOpenCard={openLinkedCard} compact={!previewExpanded}/>{previewExpanded && kind !== "note" &&<div className="preview-details">{current.methods&&<p><b>Methods:</b> <HighlightText text={current.methods} term={deferredQuery}/></p>}{current.limitations&&<p><b>Limitations:</b> <HighlightText text={current.limitations} term={deferredQuery}/></p>}{plain(current.notes)&&<div className="preview-rich-row"><b>My notes:</b><RichPreview className="rich-preview compact" html={current.notes} term={deferredQuery} onOpenCard={openLinkedCard}/></div>}</div>}{kind !== "note" && !previewExpanded&&matchedDetails.length>0&&<div className="search-matches">{matchedDetails.map(([label,text])=><p key={label}><b>{label}</b><span><HighlightText text={text} term={deferredQuery}/></span></p>)}</div>}<div className="tags">{current.keywords.slice(0,previewExpanded?12:4).map(t=><button key={t} onClick={e=>{e.stopPropagation();searchCards(t)}}><HighlightText text={t} term={deferredQuery}/></button>)}</div>
           {!!current.images?.length&&<div className="card-thumbs">{current.images.slice(0,3).map((image,i)=><button type="button" key={image.id} aria-label={`Enlarge ${image.name}`} onClick={e=>{e.stopPropagation();showFigure(current.id, image.id)}} style={{transform:`rotate(${i%2?2:-2}deg)`}}><img src={image.data} alt={image.name}/></button>)}{current.images.length>3&&<em>+{current.images.length-3}</em>}</div>}
           <footer><span title={current.projects.join(" › ")}>{current.projects.join(" › ") || (kind==="paper"?"Unfiled":kind==="author"?"Author card":kind==="note"?"Note card":"Journal card")}</span><button type="button" className="deck-edit" onClick={event => { event.stopPropagation(); openCard(current); }}>Read &amp; edit ↗</button></footer></>})()}
         </article>
@@ -867,7 +932,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
       <div className="deck-dots">{deckItems.slice(Math.max(0,boundedPosition-3),boundedPosition+4).map((item,index)=>{const itemPosition=Math.max(0,boundedPosition-3)+index;return <button key={item.card.id} className={itemPosition===boundedPosition?"active":""} onClick={() => flipTo(() => itemPosition)} aria-label={`Go to card ${itemPosition + 1}`} aria-current={itemPosition === boundedPosition ? "true" : undefined}/>})}</div>
     </section></div>
 
-    {open && <div className="modal-backdrop" onClick={e=>{if(e.target===e.currentTarget)closeCard()}}><section key={open.id} className={open.kind === "note" ? "card-modal note-modal" : "card-modal"} role="dialog" aria-modal="true" aria-label={open.title}>
+    {open && <div className="modal-backdrop editor-backdrop" onClick={e=>{if(e.target===e.currentTarget)closeCard()}}><section key={open.id} className={open.kind === "note" ? "card-modal note-modal" : "card-modal"} role="dialog" aria-modal="true" aria-label={open.title}>
       <div className="modal-top"><span className="catalog-label">{open.kind==="project"?"TOPIC":(open.kind||"paper").toUpperCase()} CARD{open.kind !== "note" && <> · {open.year || "UNDATED"}</>}</span><button aria-label="Close card" onClick={closeCard}>×</button></div>
       {(open.kind||"paper")==="paper"&&<CitationImporter onIdentify={fields=>patchOpen(Object.fromEntries(Object.entries(fields).filter(([,value])=>value)),true)}/>}
       <DraftInput aria-label="Card title" className="title-input" value={open.title} onCommit={(title, immediate) => patchOpen({ title }, immediate)}/>
