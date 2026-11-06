@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 
 const HOLD_DELAY_MS = 250;
-export const FLIP_INTERVAL_MS = 160;
+export const FLIP_INTERVAL_MS = 280;
 
-export function FlipButton({ label, className, disabled, onFlip, children }: {
+export function FlipButton({ label, className, disabled, onFlip, children, style }: {
   label: string;
   className: string;
   disabled?: boolean;
   onFlip: () => void;
   children: ReactNode;
+  style?: CSSProperties;
 }) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const repeated = useRef(false);
@@ -28,7 +29,7 @@ export function FlipButton({ label, className, disabled, onFlip, children }: {
     };
   }, [disabled, stop]);
 
-  return <button type="button" aria-label={label} className={className} disabled={disabled}
+  return <button type="button" aria-label={label} className={className} disabled={disabled} style={style}
     onPointerDown={event => {
       if (event.button !== 0 || !event.isPrimary) return;
       repeated.current = false;

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
 import { flushSync } from "react-dom";
 import { FigureGrid, FigureLightbox, type Figure } from "./figures";
 import { FlipButton, FLIP_INTERVAL_MS } from "./flip-button";
@@ -271,14 +271,29 @@ function JournalSummary({ card, term }: { card: Card; term: string }) {
   )}</dl>;
 }
 
-function AdjacentCard({ card, direction, onFlip }: { card: Card; direction: "next" | "previous"; onFlip: () => void }) {
+function CardPile({ card, count, direction, onFlip }: {
+  card: Card;
+  count: number;
+  direction: "next" | "previous";
+  onFlip: () => void;
+}) {
   const next = direction === "next";
   const thumbnail = card.images?.[0];
-  return <FlipButton className={`stack-edge stack-edge-${direction}`}
-    label={`${next ? "Next" : "Previous"} card in stack: ${card.title}`} onFlip={onFlip}>
-    <span className="stack-edge-hint" aria-hidden="true">{next ? "↑ Behind" : "↓ In front"}</span>
-    <span className="stack-edge-title">{card.title}</span>
-    {thumbnail && <img src={thumbnail.data} alt="" draggable={false} loading="lazy"/>}
+  const layers = Math.min(13, count);
+  return <FlipButton className={`card-pile card-pile-${direction}`}
+    label={`${next ? "Next" : "Previous"} card: ${card.title}. ${count} ${count === 1 ? "card" : "cards"} ${next ? "behind" : "in front"}`}
+    style={{ "--layers": layers } as CSSProperties} onFlip={onFlip}>
+    <span className="pile-sheets" aria-hidden="true">
+      {Array.from({ length: layers }, (_, index) => {
+        const layer = layers - index - 1;
+        return <span key={layer} className="pile-sheet" style={{ "--layer": layer } as CSSProperties}/>;
+      })}
+    </span>
+    <span className="pile-face" aria-hidden="true">
+      <span className="pile-caption">{count} {count === 1 ? "card" : "cards"} {next ? "behind" : "in front"}</span>
+      <span className="pile-title">{card.title}</span>
+      {thumbnail && <img src={thumbnail.data} alt="" draggable={false} loading="lazy"/>}
+    </span>
   </FlipButton>;
 }
 
@@ -830,11 +845,11 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
       <div className="deck-heading"><span>{visible.length} {visible.length===1?"card":"cards"} in this stack</span>
         <button type="button" className={previewExpanded ? "global-preview-toggle active" : "global-preview-toggle"}
           onClick={() => setPreviewExpanded(value => !value)}>{previewExpanded ? "Back to stack" : "Expand cards"}</button>
-        <span>{previewExpanded ? "Hold ← or → to flip" : "Hold a card edge or ← → to flip"}</span>
+        <span>{previewExpanded ? "Hold ← or → to flip" : "Hold either pile or ← → to flip"}</span>
       </div>
       {currentItem ? <div className={previewExpanded ? "deck-wrap" : "deck-wrap stack-compact"}>
         {previewExpanded ? <FlipButton className="flip prev" label="Previous card" disabled={boundedPosition === 0} onFlip={previousCard}>←</FlipButton>
-          : deckItems[boundedPosition + 1] && <AdjacentCard card={deckItems[boundedPosition + 1].card} direction="next" onFlip={nextCard}/>}
+          : deckItems[boundedPosition + 1] && <CardPile card={deckItems[boundedPosition + 1].card} count={lastPosition - boundedPosition} direction="next" onFlip={nextCard}/>}
         <div className="deck-shadow shadow-three"/><div className="deck-shadow shadow-two"/><div className="deck-shadow shadow-one"/>
         <article ref={cardPreviewRef} className={`note-card deck-card ${kind}-card ${previewExpanded?"preview-expanded":""}`} key={currentItem.card.id} data-flip-direction={navigation.direction} draggable
           onDragStart={e => e.dataTransfer.setData("text/plain", String(currentItem.card.id))}
@@ -847,7 +862,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
           <footer><span title={current.projects.join(" › ")}>{current.projects.join(" › ") || (kind==="paper"?"Unfiled":kind==="author"?"Author card":kind==="note"?"Note card":"Journal card")}</span><button type="button" className="deck-edit" onClick={event => { event.stopPropagation(); openCard(current); }}>Read &amp; edit ↗</button></footer></>})()}
         </article>
         {previewExpanded ? <FlipButton className="flip next" label="Next card" disabled={boundedPosition >= lastPosition} onFlip={nextCard}>→</FlipButton>
-          : deckItems[boundedPosition - 1] && <AdjacentCard card={deckItems[boundedPosition - 1].card} direction="previous" onFlip={previousCard}/>}
+          : deckItems[boundedPosition - 1] && <CardPile card={deckItems[boundedPosition - 1].card} count={boundedPosition} direction="previous" onFlip={previousCard}/>}
       </div> : <div className="empty"><b>No cards found</b><span>Try another phrase or divider.</span></div>}
       <div className="deck-dots">{deckItems.slice(Math.max(0,boundedPosition-3),boundedPosition+4).map((item,index)=>{const itemPosition=Math.max(0,boundedPosition-3)+index;return <button key={item.card.id} className={itemPosition===boundedPosition?"active":""} onClick={() => flipTo(() => itemPosition)} aria-label={`Go to card ${itemPosition + 1}`} aria-current={itemPosition === boundedPosition ? "true" : undefined}/>})}</div>
     </section></div>
