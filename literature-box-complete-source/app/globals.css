@@ -103,12 +103,14 @@
 .stack-compact {
   --sheet-step: clamp(3.5px, .55vh, 6px);
   --sheet-face: 11px;
+  --pile-tilt: 32deg;
   --edge-height: calc(var(--sheet-face) + 17 * var(--sheet-step));
   min-height: 0;
   grid-template-columns: min(580px, 80vw, 100%);
   grid-template-rows: var(--edge-height) auto var(--edge-height);
   justify-content: center;
   perspective: 950px;
+  perspective-origin: 50% 46%;
 }
 .stack-compact .deck-shadow { display: none; }
 .stack-compact .deck-card {
@@ -137,7 +139,7 @@
 .stack-compact:has(.card-thumbs) .deck-card { padding-right: 124px; }
 .stack-compact:has(.card-thumbs) .deck-card footer { right: 124px; }
 .stack-compact .deck-card[data-flip-direction="next"] { animation: flip-from-behind .28s cubic-bezier(.2,.72,.24,1); transform-origin: center bottom; }
-.stack-compact .deck-card[data-flip-direction="previous"] { animation: flip-from-front .28s cubic-bezier(.2,.72,.24,1); transform-origin: center top; }
+.stack-compact .deck-card[data-flip-direction="previous"] { animation: flip-from-front .28s cubic-bezier(.2,.72,.24,1); transform-origin: center bottom; }
 .card-pile {
   position: relative;
   width: 100%;
@@ -152,12 +154,12 @@
   user-select: none;
 }
 .card-pile:focus-visible { outline: 2px solid #8d694b; outline-offset: 3px; }
-.card-pile-next { grid-area: 1 / 1; align-self: end; z-index: 2; margin-bottom: -2px; transform: rotateX(18deg); transform-origin: bottom; }
-.card-pile-previous { grid-area: 3 / 1; align-self: start; z-index: 4; margin-top: -5px; width: calc(100% + 16px); transform: rotateX(-20deg); transform-origin: top; }
+.card-pile-next { grid-area: 1 / 1; align-self: end; z-index: 2; margin-bottom: -2px; transform: rotateX(var(--pile-tilt)); transform-origin: bottom; }
+.card-pile-previous { grid-area: 3 / 1; align-self: start; z-index: 4; margin-top: -5px; width: calc(100% + 12px); transform: rotateX(var(--pile-tilt)); transform-origin: top; }
 .pile-sheets, .pile-sheet { position: absolute; pointer-events: none; }
 .pile-sheets { inset: 0; }
 .pile-sheet {
-  inset-inline: calc(var(--layer) * .75px);
+  inset-inline: 0;
   height: var(--sheet-face);
   border: 1px solid #a38a65;
   background: linear-gradient(#efdfc0 0 65%, #bca480 66%);
@@ -171,12 +173,12 @@
 .deck-edit:hover { text-decoration: underline; }
 .flip { touch-action: manipulation; }
 @keyframes flip-from-behind {
-  from { transform: translateY(-20px) rotateX(-46deg); opacity: .55; }
-  to { transform: translateY(0) rotateX(0); opacity: 1; }
+  from { transform: rotateX(52deg); }
+  to { transform: rotateX(0); }
 }
 @keyframes flip-from-front {
-  from { transform: translateY(20px) rotateX(46deg); opacity: .55; }
-  to { transform: translateY(0) rotateX(0); opacity: 1; }
+  from { transform: rotateX(-52deg); }
+  to { transform: rotateX(0); }
 }
 @media (prefers-reduced-motion: reduce) {
   .stack-compact .deck-card[data-flip-direction] { animation: none; }
