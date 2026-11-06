@@ -1,7 +1,7 @@
-import { Mark, Extension } from "@tiptap/core";
+import { Mark, Extension, getHTMLFromFragment } from "@tiptap/core";
 import { EditorContent, useEditor, useEditorState, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useId, useRef, useState } from "react";
 import { cardHref, linkedCardId, safeLink, safeRichHtml, type LinkableCard } from "./rich-text";
 
 const DoubleUnderline = Mark.create({
@@ -132,10 +132,11 @@ export const RichField = memo(function RichField({ label, value, onDraft, cards,
 }) {
   const id = useId();
   const lastValue = useRef(value);
-  const content = useMemo(() => safeRichHtml(value), [value]);
+  const initialContent = useRef<string | null>(null);
+  if (initialContent.current === null) initialContent.current = safeRichHtml(value);
   const editor = useEditor({
     extensions,
-    content,
+    content: initialContent.current,
     immediatelyRender: false,
     shouldRerenderOnTransaction: false,
     editorProps: {
@@ -148,17 +149,21 @@ export const RichField = memo(function RichField({ label, value, onDraft, cards,
         return false;
       },
     },
-    onUpdate: ({ editor }) => onDraft(() => {
-      const html = editor.isEmpty ? "" : editor.getHTML();
-      lastValue.current = html;
-      return html;
-    }),
+    onUpdate: ({ editor }) => {
+      const { doc, schema } = editor.state;
+      const empty = editor.isEmpty;
+      onDraft(() => {
+        const html = empty ? "" : getHTMLFromFragment(doc.content, schema);
+        lastValue.current = html;
+        return html;
+      });
+    },
   });
   useEffect(() => {
     if (!editor || value === lastValue.current) return;
-    editor.commands.setContent(content, { emitUpdate: false });
+    editor.commands.setContent(safeRichHtml(value), { emitUpdate: false });
     lastValue.current = value;
-  }, [editor, value, content]);
+  }, [editor, value]);
   const openLink = (href: string) => {
     const cardId = linkedCardId(href);
     if (cardId !== null) onOpenCard(cardId);

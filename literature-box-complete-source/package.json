@@ -1,6 +1,6 @@
 {
   "name": "literature-box-desktop",
-  "version": "3.2.0",
+  "version": "3.2.1",
   "private": true,
   "main": "desktop/main.cjs",
   "engines": {
@@ -56,10 +56,10 @@
     "wrangler": "4.92.0"
   },
   "type": "module",
-  "displayName": "The Literature Box",
+  "displayName": "Literature Box Classic",
   "build": {
     "appId": "com.literaturebox.desktop",
-    "productName": "The Literature Box",
+    "productName": "Literature Box Classic",
     "files": ["desktop/**/*", "desktop-dist/**/*", "node_modules/**/*", "package.json"],
     "asarUnpack": ["node_modules/better-sqlite3/**/*"],
     "directories": {"output": "release"},

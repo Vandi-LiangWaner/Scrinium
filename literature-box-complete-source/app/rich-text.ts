@@ -17,6 +17,7 @@ export function safeLink(href: string) {
 }
 
 export function inlineCardIds(html: string) {
+  if (!html.includes("#card-")) return [];
   return Array.from(new Set(Array.from(
     safeRichHtml(html).matchAll(/<a href="#card-(\d+)">/g),
     match => Number(match[1]),
