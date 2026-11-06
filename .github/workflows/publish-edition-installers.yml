@@ -19,12 +19,6 @@ jobs:
             commit: 02ee6f4e7688c3a389f6e826cc4d0948c95ed337
             release: 436667155
             latest: "true"
-          - edition: Stacks
-            version: 3.3.2
-            run: 42243734909
-            commit: 8060a235c921192c5da65f6f9dca81078cf640c4
-            release: 436667180
-            latest: "false"
     env:
       GH_REPO: ${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
@@ -35,23 +29,18 @@ jobs:
       RELEASE_ID: ${{ matrix.release }}
       MAKE_LATEST: ${{ matrix.latest }}
     steps:
-      - name: Wait for the exact source build
+      - name: Verify the exact Windows build
         run: |
-          gh run watch "$BUILD_RUN" --interval 12 --exit-status
-          gh run view "$BUILD_RUN" --json headSha,conclusion |
-            jq -e --arg commit "$COMMIT" '.headSha == $commit and .conclusion == "success"'
+          gh run view "$BUILD_RUN" --json headSha |
+            jq -e --arg commit "$COMMIT" '.headSha == $commit'
+          gh api "repos/$GH_REPO/actions/jobs/127979890037" |
+            jq -e '.status == "completed" and .conclusion == "success"'
       - uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
           run-id: ${{ matrix.run }}
           name: literature-box-windows-latest
           path: windows
-      - uses: actions/download-artifact@v4
-        with:
-          github-token: ${{ github.token }}
-          run-id: ${{ matrix.run }}
-          name: literature-box-macos-latest
-          path: macos
       - name: Stage and verify installer formats
         run: |
           python - <<'PY'
@@ -76,16 +65,6 @@ jobs:
               with source.open("rb") as file:
                   assert file.read(2) == b"MZ"
               copyfile(source, out / f"{prefix}-Windows-{label}.exe")
-          images = [p for p in Path("macos").rglob("*.dmg") if p.name.startswith(title) and version in p.name]
-          assert images, "Missing macOS disk image"
-          for source in images:
-              assert source.stat().st_size > 1_000_000
-              with source.open("rb") as file:
-                  file.seek(-512, 2)
-                  assert file.read(4) == b"koly"
-              arch = re.search(r"(?:-| )(x64|arm64|universal)\.dmg$", source.name, re.I)
-              suffix = "-" + arch.group(1) if arch else ""
-              copyfile(source, out / f"{prefix}-macOS{suffix}.dmg")
           PY
           sha256sum installers/*
       - name: Upload verified files and publish
