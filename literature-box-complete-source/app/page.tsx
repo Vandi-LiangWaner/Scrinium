@@ -303,7 +303,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const [addingCategoryFor,setAddingCategoryFor]=useState<number|null>(null);
   const [newCategoryName,setNewCategoryName]=useState("");
   const [figurePreview, setFigurePreview] = useState<{ cardId: number; imageId: number } | null>(null);
-  const [returnToNote, setReturnToNote] = useState<number | null>(null);
+  const [returnToCard, setReturnToCard] = useState<number | null>(null);
   const [clearingAll,setClearingAll]=useState(false);
   const [clearConfirmation,setClearConfirmation]=useState("");
   const history=useRef<Card[][]>([]);
@@ -544,11 +544,11 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
       closingSave.current = work;
       void work.finally(() => { if (closingSave.current === work) closingSave.current = null; });
     }
-    const note = returnToNote === null ? null :
-      closingDrafts.current.get(returnToNote)?.() || stagedCard(returnToNote) || cards.find(card => card.id === returnToNote);
-    openCardRef.current = note || null;
-    setOpen(note || null);
-    setReturnToNote(null);
+    const origin = returnToCard === null ? null :
+      closingDrafts.current.get(returnToCard)?.() || stagedCard(returnToCard) || cards.find(card => card.id === returnToCard);
+    openCardRef.current = origin || null;
+    setOpen(origin || null);
+    setReturnToCard(null);
   }
   function removeOpenCard() {
     if (!open) return;
@@ -560,10 +560,10 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     draftStarted.current = 0;
     setHasDraft(false);
     setCards(current => current.filter(card => card.id !== open.id));
-    const note = cards.find(card => card.id === returnToNote);
-    openCardRef.current = note || null;
-    setOpen(note || null);
-    setReturnToNote(null);
+    const origin = cards.find(card => card.id === returnToCard);
+    openCardRef.current = origin || null;
+    setOpen(origin || null);
+    setReturnToCard(null);
   }
   function restoreOpen(snapshot: Card[]) {
     takeDraft();
@@ -577,7 +577,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   function addCard() {
     if (!ready) return;
     publishOpenCard();
-    setReturnToNote(null);
+    setReturnToCard(null);
     const card = blank(kind);
     setCards(current => {
       while (current.some(item => item.id === card.id)) card.id++;
@@ -590,7 +590,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     const target = cards.find(card => card.id === id);
     if (!target) { alert("This linked card is unavailable."); return; }
     const current = openCardRef.current;
-    if (current?.kind === "note") setReturnToNote(current.id);
+    if (current && current.id !== id) setReturnToCard(origin => origin ?? current.id);
     openCard(target);
   }, [cards, openCard]);
   function showFigure(cardId: number, imageId: number) {
@@ -740,7 +740,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     const body=JSON.stringify({ version: 3, ...library },null,2);
     if(window.literatureBox){const saved=await window.literatureBox.exportFile("json",body);if(saved===false)return}
     else{const a=document.createElement("a");const url=URL.createObjectURL(new Blob([body],{type:"application/json"}));a.href=url;a.download="literature-box-before-delete.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
-    if(editorCommitTimer.current)clearTimeout(editorCommitTimer.current);editorCommitTimer.current=null;pendingCard.current=null;pendingRich.current={};discardStagedCards();draftStarted.current=0;setHasDraft(false);openCardRef.current=null;setReturnToNote(null);history.current.push(cards);future.current=[];setCards([]);setOpen(null);setPosition(0);setFilter("All cards");setProjectPath([]);setTopicOrder([]);setClearingAll(false);setClearConfirmation("");
+    if(editorCommitTimer.current)clearTimeout(editorCommitTimer.current);editorCommitTimer.current=null;pendingCard.current=null;pendingRich.current={};discardStagedCards();draftStarted.current=0;setHasDraft(false);openCardRef.current=null;setReturnToCard(null);history.current.push(cards);future.current=[];setCards([]);setOpen(null);setPosition(0);setFilter("All cards");setProjectPath([]);setTopicOrder([]);setClearingAll(false);setClearConfirmation("");
   }
   function topicDocumentContent(){
     const papers=cards.filter(c=>(c.kind||"paper")==="paper").sort((a,b)=>(a.projects.join(" > ")||"Unfiled").localeCompare(b.projects.join(" > ")||"Unfiled")||a.title.localeCompare(b.title));
@@ -782,11 +782,12 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
             ...card, id, createdAt: card.createdAt || (card.id > 1_000_000_000_000 ? card.id : Date.now() - (imported.length - index) * 1000),
           }, cardCategories(card)));
         });
-        return [...additions.map(card => card.kind !== "note" ? card : {
+        return [...additions.map(card => ({
           ...card,
+          findings: remapInlineLinks(card.findings || "", remappedIds),
           notes: remapInlineLinks(card.notes || "", remappedIds),
           ...(card.relatedCardIds && { relatedCardIds: Array.from(new Set(card.relatedCardIds.map(id => remappedIds.get(id) ?? id))) }),
-        }), ...current];
+        })), ...current];
       });
       if (Array.isArray(data.statuses)) setStatuses(current => Array.from(new Set([...current, ...data.statuses])));
       if (data.collectionCategories) setCollectionCategories(current => ({
@@ -837,7 +838,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
       <button className="edit-statuses" onClick={() => editCategories(kind)}>＋ Edit categories</button>
     </nav>}
     <div className={kind==="paper"&&groupBy==="project"?"topic-layout":kind==="paper"&&(groupBy==="keyword"||groupBy==="author")?"value-navigation-layout":""}>
-    {kind==="paper"&&groupBy==="project"&&<aside className="topic-navigation-panel"><TopicNavigation paths={existingTopicPaths} selected={projectPath} onSelect={selectProjectPath} onEdit={editCurrentTabs} onDropCard={(id,path)=>change(cs=>cs.map(card=>card.id===id?{...card,projects:path}:card))} onReorder={reorderTopic} onRename={renameTopic} customOrder={topicOrder} count={topicCount} total={matchingKindCards.length} unfiledCount={matchingKindCards.filter(card=>!card.projects.length).length} showUnfiled={filter==="Without topic"} onSelectUnfiled={()=>{setProjectPath([]);selectFilter("Without topic")}}/>{projectPath.length>0&&<div className="topic-intro-panel"><nav className="topic-breadcrumb" aria-label="Topic path"><button onClick={()=>selectProjectPath([])}>Topics</button>{projectPath.map((level,i)=><button key={`${level}-${i}`} className={i===projectPath.length-1?"active":""} onClick={()=>selectProjectPath(projectPath.slice(0,i+1))}>› {level}</button>)}</nav><div className="topic-intro-trail">{topicTrail.map((item,i)=>{const html=item.card?.findings||"";const current=i===topicTrail.length-1;return <section key={item.path.join("/")} className={current?"topic-intro-item current":"topic-intro-item"} role="button" tabIndex={0} onClick={()=>item.card&&openCard(item.card)} onKeyDown={e=>{if((e.key==="Enter"||e.key===" ")&&item.card)openCard(item.card)}}><small>{i===0?"Topic":`Level ${i+1}`}</small><h2>{item.level}</h2>{html?<RichPreview html={html} className={`topic-intro-content ${current&&introExpanded?"expanded":""}`}/>:<p className="topic-intro-content">No introduction yet.</p>}<em>Edit introduction ↗</em></section>})}</div>{plain(selectedProjectCard?.findings||"").length>220&&<button className="intro-toggle" onClick={()=>setIntroExpanded(v=>!v)}>{introExpanded?"Show less":"Show more"}</button>}</div>}</aside>}
+    {kind==="paper"&&groupBy==="project"&&<aside className="topic-navigation-panel"><TopicNavigation paths={existingTopicPaths} selected={projectPath} onSelect={selectProjectPath} onEdit={editCurrentTabs} onDropCard={(id,path)=>change(cs=>cs.map(card=>card.id===id?{...card,projects:path}:card))} onReorder={reorderTopic} onRename={renameTopic} customOrder={topicOrder} count={topicCount} total={matchingKindCards.length} unfiledCount={matchingKindCards.filter(card=>!card.projects.length).length} showUnfiled={filter==="Without topic"} onSelectUnfiled={()=>{setProjectPath([]);selectFilter("Without topic")}}/>{projectPath.length>0&&<div className="topic-intro-panel"><nav className="topic-breadcrumb" aria-label="Topic path"><button onClick={()=>selectProjectPath([])}>Topics</button>{projectPath.map((level,i)=><button key={`${level}-${i}`} className={i===projectPath.length-1?"active":""} onClick={()=>selectProjectPath(projectPath.slice(0,i+1))}>› {level}</button>)}</nav><div className="topic-intro-trail">{topicTrail.map((item,i)=>{const html=item.card?.findings||"";const current=i===topicTrail.length-1;return <section key={item.path.join("/")} className={current?"topic-intro-item current":"topic-intro-item"} role="button" tabIndex={0} onClick={()=>item.card&&openCard(item.card)} onKeyDown={e=>{if((e.key==="Enter"||e.key===" ")&&item.card)openCard(item.card)}}><small>{i===0?"Topic":`Level ${i+1}`}</small><h2>{item.level}</h2>{html?<RichPreview html={html} className={`topic-intro-content ${current&&introExpanded?"expanded":""}`} onOpenCard={openLinkedCard}/>:<p className="topic-intro-content">No introduction yet.</p>}<em>Edit introduction ↗</em></section>})}</div>{plain(selectedProjectCard?.findings||"").length>220&&<button className="intro-toggle" onClick={()=>setIntroExpanded(v=>!v)}>{introExpanded?"Show less":"Show more"}</button>}</div>}</aside>}
 
     {kind==="paper"&&(groupBy==="keyword"||groupBy==="author")&&<aside className="value-navigation-panel"><ValueNavigation key={groupBy} title={groupBy==="keyword"?"Keywords":"Authors"} values={groupValues} selected={filter} onSelect={selectFilter} count={groupCount} onEdit={groupBy==="keyword"?editCurrentTabs:undefined} onDropCard={groupBy==="keyword"?(id,value)=>{change(cs=>cs.map(card=>card.id===id?{...card,keywords:Array.from(new Set([...card.keywords,value]))}:card));selectFilter(value)}:undefined}/></aside>}
 
@@ -877,7 +878,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
           {!openCategories.length && <small>No categories yet.</small>}
         </div><button type="button" className="new-category-button" onClick={() => addCategoryFromCard(open)}>＋ New category</button></div>
       </div>}
-      {open.kind !== "note" && <RichField label={(open.kind||"paper")==="paper"?"Key findings":open.kind==="author"?"Profile":open.kind==="project"?"Topic introduction":"Journal overview"} value={open.findings} onDraft={draftFindings} onOpenCard={openLinkedCard}/>}
+      {open.kind !== "note" && <RichField label={(open.kind||"paper")==="paper"?"Key findings":open.kind==="author"?"Profile":open.kind==="project"?"Topic introduction":"Journal overview"} value={open.findings} onDraft={draftFindings} cards={linkableCards} onOpenCard={openLinkedCard}/>}
       {open.kind === "note" && <RichField label="Note" value={open.notes} onDraft={draftNotes} cards={linkableCards} onOpenCard={openLinkedCard} large/>}
       {open.kind === "note" && <section className="note-links" aria-label="Linked cards">
         <h3>Linked cards</h3>
@@ -900,9 +901,9 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
           : <p className="attachment-empty">Add figures, diagrams, screenshots, or handwritten notes.</p>}
       </div>
       {open.kind!=="project"&&open.kind!=="note"&&<div className="field-row"><label>{(open.kind||"paper")==="paper"?"Methods":open.kind==="author"?"Approach / traditions":"Scope"}<DraftTextarea value={open.methods} onKeyDown={allowTab} onCommit={(methods, immediate) => patchOpen({ methods }, immediate)}/></label><label>{(open.kind||"paper")==="paper"?"Limitations":open.kind==="author"?"Cautions / critiques":"Submission notes"}<DraftTextarea value={open.limitations} onKeyDown={allowTab} onCommit={(limitations, immediate) => patchOpen({ limitations }, immediate)}/></label></div>}
-      {open.kind !== "note" && <RichField label="My notes" value={open.notes} onDraft={draftNotes} onOpenCard={openLinkedCard}/>}
+      {open.kind !== "note" && <RichField label="My notes" value={open.notes} onDraft={draftNotes} cards={linkableCards} onOpenCard={openLinkedCard}/>}
       {open.kind!=="project"&&open.kind!=="note"&&<label>PDF or EndNote link<DraftInput value={open.link} placeholder="https://…" onCommit={(link, immediate) => patchOpen({ link }, immediate)}/></label>}
-      <div className="modal-foot"><button className="delete" onClick={()=>{if(confirm("Remove this card?"))removeOpenCard()}}>Remove card</button><div className="editor-save-controls"><span role="status">{statusText}</span>{saveStatus === "error" && <button type="button" onClick={() => void flushAndSave()}>Retry save</button>}</div><button className="done" onClick={closeCard}>{returnToNote !== null ? "Back to note" : "Done"}</button></div>
+      <div className="modal-foot"><button className="delete" onClick={()=>{if(confirm("Remove this card?"))removeOpenCard()}}>Remove card</button><div className="editor-save-controls"><span role="status">{statusText}</span>{saveStatus === "error" && <button type="button" onClick={() => void flushAndSave()}>Retry save</button>}</div><button className="done" onClick={closeCard}>{returnToCard !== null ? "Back to original card" : "Done"}</button></div>
     </section></div>}
     {editingStatuses&&<div className="modal-backdrop"><section className="status-editor" role="dialog" aria-modal="true" aria-label="Edit categories"><div className="modal-top"><div><span className="catalog-label">{collectionLabels[editingStatuses].toUpperCase()} · CATEGORIES</span><h2>Edit categories</h2></div><button aria-label="Close" onClick={()=>setEditingStatuses(null)}>×</button></div><p>Add as many categories as you need. Their order becomes the tab order.</p><div className="status-fields">{statusDraft.map((status,i)=><div key={i}><span>{i+1}</span><input value={status} autoFocus={i===0} onChange={e=>setStatusDraft(ds=>ds.map((d,n)=>n===i?e.target.value:d))}/><button aria-label={`Remove ${status}`} onClick={()=>setStatusDraft(ds=>ds.map((value,n)=>n===i?"":value))}>×</button></div>)}</div><button className="add-status" onClick={()=>setStatusDraft(ds=>[...ds,`Category ${ds.length+1}`])}>＋ Add category</button><div className="modal-foot"><button onClick={()=>setEditingStatuses(null)}>Cancel</button><span>{statusDraft.length} categories</span><button className="done" onClick={saveCategories}>Save categories</button></div></section></div>}
     {editingValues&&<div className="modal-backdrop"><section className="status-editor" role="dialog" aria-modal="true"><div className="modal-top"><div><span className="catalog-label">{editingValues==="project"?"TOPIC LEVEL":"KEYWORDS"}</span><h2>Edit {editingValues==="project"?"topics":"keywords"}</h2></div><button aria-label="Close" onClick={()=>setEditingValues(null)}>×</button></div><p>{editingValues==="project"?(projectPath.length?`Manage subtopics under ${projectPath.at(-1)}.`:"Manage top-level topics."):"Rename an item below, or remove it from every card."}</p><div className="status-fields">{valueDraft.map((value,i)=><div key={i}><span>{i+1}</span><input value={value} autoFocus={i===0} placeholder={editingValues==="project"?"Topic name":"Keyword"} onChange={e=>setValueDraft(values=>values.map((item,n)=>n===i?e.target.value:item))}/><button aria-label={`Remove ${value}`} onClick={()=>setValueDraft(values=>values.map((item,n)=>n===i?"":item))}>×</button></div>)}</div>{editingValues==="project"&&projectPath.length<5&&<button className="add-status" onClick={()=>setValueDraft(values=>[...values,""])}>＋ Add topic here</button>}<div className="modal-foot"><button onClick={()=>setEditingValues(null)}>Cancel</button><span>{editingValues==="project"?"Maximum five levels":"Applies to all matching cards"}</span><button className="done" onClick={saveEditedValues}>Save changes</button></div></section></div>}

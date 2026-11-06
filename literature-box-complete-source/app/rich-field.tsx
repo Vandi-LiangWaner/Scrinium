@@ -117,7 +117,10 @@ function FormatToolbar({ editor, label, cards, onOpenLink }: {
         {draft.existing && safeLink(draft.href) && <button type="button" onClick={() => onOpenLink(draft.href)}>Open link</button>}
         <button type="button" onClick={() => { setDraft(null); editor.commands.focus(); }}>Cancel</button>
       </div>
-      {cards && <CardLinkPicker cards={cards} onPick={card => applyLink(cardHref(card.id), card.title)}/>}
+      {cards && <div role="group" aria-label="Link to a card">
+        <span className="rich-title">Link to a paper, author, or journal</span>
+        <CardLinkPicker cards={cards} onPick={card => applyLink(cardHref(card.id), card.title)}/>
+      </div>}
     </div>}
   </>;
 }
