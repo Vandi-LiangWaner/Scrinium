@@ -1,6 +1,6 @@
 {
   "name": "literature-box-desktop",
-  "version": "0.1.0",
+  "version": "3.2.0",
   "private": true,
   "main": "desktop/main.cjs",
   "engines": {
@@ -22,6 +22,11 @@
     "desktop:package:mac": "npm run desktop:build && electron-builder --mac"
   },
   "dependencies": {
+    "@floating-ui/dom": "^1.8.0",
+    "@tiptap/core": "^3.33.0",
+    "@tiptap/pm": "^3.33.0",
+    "@tiptap/react": "^3.33.0",
+    "@tiptap/starter-kit": "^3.33.0",
     "better-sqlite3": "^12.11.1",
     "drizzle-orm": "0.45.2",
     "next": "16.2.6",

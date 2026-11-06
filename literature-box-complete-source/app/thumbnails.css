@@ -4,7 +4,41 @@
 .card-thumbs em{align-self:center;background:#6e4631;color:#fff;border-radius:14px;padding:5px 8px;font:10px Arial,sans-serif}
 .deck-wrap:has(.card-thumbs) .deck-card{padding-right:172px}
 @media(max-width:700px){.card-thumbs{right:10px}.card-thumbs button{width:88px;height:66px}.deck-wrap:has(.card-thumbs) .deck-card{padding-right:112px}}
-.image-lightbox{position:fixed;z-index:100;inset:0;display:grid;grid-template-rows:1fr auto;place-items:center;padding:42px;background:#1e1814eF;cursor:zoom-out}.image-lightbox img{display:block;max-width:min(1200px,92vw);max-height:82vh;object-fit:contain;background:#fff;box-shadow:0 20px 70px #000}.image-lightbox>button{position:absolute;right:24px;top:18px;border:0;background:transparent;color:#fff;font:38px Georgia;cursor:pointer}.image-lightbox span{margin-top:14px;color:#f7ead7;font:13px Arial,sans-serif}
+.figure-lightbox[open] {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  padding: 44px 20px 20px;
+  border: 0;
+  background: #1e1814f5;
+  color: #f7ead7;
+}
+.figure-lightbox figure { margin: 0; text-align: center; }
+.figure-lightbox img { display: block; max-width: min(1200px, 92vw); max-height: 70vh; margin: 0 auto; object-fit: contain; background: #fff; }
+.figure-lightbox figcaption { margin-top: 8px; max-width: min(1000px, 90vw); font: 14px/1.4 Arial, sans-serif; }
+.figure-lightbox figcaption p { margin: 5px 0 0; max-height: 12vh; overflow-y: auto; white-space: pre-wrap; }
+.figure-lightbox button { cursor: pointer; }
+.figure-lightbox-close { position: absolute; top: 8px; right: 20px; background: transparent; color: inherit; border: 0; font: 34px Georgia, serif; }
+.figure-navigation { display: flex; align-items: center; gap: 12px; font: 13px Arial, sans-serif; }
+.figure-navigation button { border: 1px solid #8c7865; border-radius: 5px; padding: 7px 12px; background: #4f3e31; color: inherit; }
+.figure-navigation button:disabled { opacity: .45; cursor: default; }
+.image-grid figure.figure-drop-target { outline: 3px solid #94704d; }
+.image-grid figure .figure-actions { display: flex; align-items: center; gap: 5px; padding: 4px; color: #64523f; font: 11px Arial, sans-serif; }
+.image-grid figure .figure-actions button { position: static; display: grid; place-items: center; width: 25px; height: 25px; border-radius: 3px; }
+.image-grid figure .figure-drag { cursor: grab; background: #ebdec2; color: #583d29; font-size: 17px; }
+.image-grid figure .figure-drag:active { cursor: grabbing; }
+.image-grid figure .figure-remove { margin-left: auto; }
+.image-grid figure button.figure-enlarge { position: static; display: block; width: 100%; height: auto; padding: 0; border-radius: 0; background: #f7eedc; cursor: zoom-in; }
+.image-grid figure img { object-fit: contain; }
+.image-grid figcaption > span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.card-modal .image-grid figcaption textarea { min-height: 42px; background: #f8eedb; font-size: 12px; }
 .zoomable-image{cursor:zoom-in}.findings-images{margin-top:10px}
 .citation-importer{display:block;margin:18px 0 4px;padding:12px 14px;background:#eee2ca;border:1px dashed #aa997e!important}
 .citation-importer textarea{min-height:58px!important;margin-top:7px!important;background:#fffaf0!important}
