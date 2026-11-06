@@ -283,8 +283,7 @@ function CardPile({ card, count, direction, onFlip }: {
   onFlip: () => void;
 }) {
   const next = direction === "next";
-  const thumbnail = card.images?.[0];
-  const layers = Math.min(13, count);
+  const layers = Math.min(18, count);
   return <FlipButton className={`card-pile card-pile-${direction}`}
     label={`${next ? "Next" : "Previous"} card: ${card.title}. ${count} ${count === 1 ? "card" : "cards"} ${next ? "behind" : "in front"}`}
     style={{ "--layers": layers } as CSSProperties} onFlip={onFlip}>
@@ -293,11 +292,6 @@ function CardPile({ card, count, direction, onFlip }: {
         const layer = layers - index - 1;
         return <span key={layer} className="pile-sheet" style={{ "--layer": layer } as CSSProperties}/>;
       })}
-    </span>
-    <span className="pile-face" aria-hidden="true">
-      <span className="pile-caption">{count} {count === 1 ? "card" : "cards"} {next ? "behind" : "in front"}</span>
-      <span className="pile-title">{card.title}</span>
-      {thumbnail && <img src={thumbnail.data} alt="" draggable={false} loading="lazy"/>}
     </span>
   </FlipButton>;
 }

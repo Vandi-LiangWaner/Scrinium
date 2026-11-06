@@ -101,33 +101,37 @@
 .save-state button { margin-left: 6px; }
 
 .stack-compact {
-  --sheet-step: clamp(3px, .46vh, 4px);
-  --sheet-face: 38px;
-  --edge-height: calc(var(--sheet-face) + 12 * var(--sheet-step));
+  --sheet-step: clamp(3.5px, .55vh, 6px);
+  --sheet-face: 11px;
+  --edge-height: calc(var(--sheet-face) + 17 * var(--sheet-step));
   min-height: 0;
-  grid-template-columns: min(680px, 82vw, 100%);
+  grid-template-columns: min(580px, 80vw, 100%);
   grid-template-rows: var(--edge-height) auto var(--edge-height);
   justify-content: center;
   perspective: 950px;
 }
-.stack-compact .deck-card,
-.stack-compact .deck-shadow {
+.stack-compact .deck-shadow { display: none; }
+.stack-compact .deck-card {
   grid-area: 2 / 1;
   width: 100%;
-  height: clamp(285px, 40vh, 370px);
+  height: clamp(260px, 36vh, 326px);
   min-height: 0;
+  padding-block: 24px 56px;
+  border-radius: 2px;
+  background: linear-gradient(#f8efdb, #efe2c4);
+  box-shadow: 0 3px 9px #392c1d55;
 }
-.stack-compact .deck-shadow { position: relative; pointer-events: none; }
-.stack-compact .deck-card { padding-block: 27px 60px; }
 .stack-compact .deck-card h2 {
-  margin-top: 16px;
+  margin-top: 10px;
+  margin-bottom: 9px;
+  font: bold italic clamp(21px, 2.5vw, 32px)/1.1 Georgia, serif;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
   overflow-wrap: anywhere;
 }
-.stack-compact .rule { margin-block: 12px; }
+.stack-compact .rule { margin-block: 10px; }
 .stack-compact .card-thumbs { top: 60px; right: 14px; gap: 6px; }
 .stack-compact .card-thumbs button { width: 96px; height: 66px; }
 .stack-compact:has(.card-thumbs) .deck-card { padding-right: 124px; }
@@ -137,7 +141,7 @@
 .card-pile {
   position: relative;
   width: 100%;
-  height: calc(var(--sheet-face) + (var(--layers) - 1) * var(--sheet-step));
+  height: max(32px, calc(var(--sheet-face) + (var(--layers) - 1) * var(--sheet-step)));
   padding: 0;
   border: 0;
   background: transparent;
@@ -148,28 +152,21 @@
   user-select: none;
 }
 .card-pile:focus-visible { outline: 2px solid #8d694b; outline-offset: 3px; }
-.card-pile-next { grid-area: 1 / 1; align-self: end; z-index: 2; margin-bottom: -2px; transform: rotateX(15deg); transform-origin: bottom; }
-.card-pile-previous { grid-area: 3 / 1; align-self: start; z-index: 4; margin-top: -5px; transform: rotateX(-18deg); transform-origin: top; }
-.pile-sheets, .pile-sheet, .pile-face { position: absolute; pointer-events: none; }
+.card-pile-next { grid-area: 1 / 1; align-self: end; z-index: 2; margin-bottom: -2px; transform: rotateX(18deg); transform-origin: bottom; }
+.card-pile-previous { grid-area: 3 / 1; align-self: start; z-index: 4; margin-top: -5px; width: calc(100% + 16px); transform: rotateX(-20deg); transform-origin: top; }
+.pile-sheets, .pile-sheet { position: absolute; pointer-events: none; }
 .pile-sheets { inset: 0; }
 .pile-sheet {
-  inset-inline: calc(var(--layer) * .9px);
+  inset-inline: calc(var(--layer) * .75px);
   height: var(--sheet-face);
-  border: 1px solid #a99575;
-  background: linear-gradient(#f6edd8 0 62%, #dfcfac);
-  box-shadow: 0 1px 2px #4a372539;
+  border: 1px solid #a38a65;
+  background: linear-gradient(#efdfc0 0 65%, #bca480 66%);
+  box-shadow: 0 2px 3px #4a372545;
 }
-.pile-sheet:nth-child(2n) { background: linear-gradient(#e5d5b5 0 62%, #cbb68f); }
-.pile-sheet:last-child { background: linear-gradient(#f5ecd8, #eadcbb); }
-.card-pile:hover .pile-sheet:last-child, .card-pile:focus-visible .pile-sheet:last-child { background: #fbf1db; }
+.pile-sheet:nth-child(2n) { background: linear-gradient(#e4d2ad 0 65%, #b49a74 66%); }
+.card-pile:hover .pile-sheet, .card-pile:focus-visible .pile-sheet { border-color: #806748; }
 .card-pile-next .pile-sheet { bottom: calc(var(--layer) * var(--sheet-step)); }
 .card-pile-previous .pile-sheet { top: calc(var(--layer) * var(--sheet-step)); }
-.pile-face { inset-inline: 14px; display: flex; align-items: center; gap: 9px; height: var(--sheet-face); }
-.card-pile-next .pile-face { bottom: 0; }
-.card-pile-previous .pile-face { top: 0; }
-.pile-caption { flex: none; color: #74543d; font: 9px Arial, sans-serif; text-transform: uppercase; letter-spacing: .06em; }
-.pile-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
-.pile-face img { flex: none; width: 38px; height: 27px; object-fit: contain; background: #fff9eb; }
 .deck-edit { flex: none; border: 0; background: transparent; color: #874b34; padding: 0; font: inherit; font-weight: bold; text-transform: uppercase; cursor: pointer; }
 .deck-edit:hover { text-decoration: underline; }
 .flip { touch-action: manipulation; }
