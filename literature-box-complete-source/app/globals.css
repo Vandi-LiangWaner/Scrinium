@@ -106,41 +106,45 @@
   --pile-tilt: 32deg;
   --edge-height: calc(var(--sheet-face) + 17 * var(--sheet-step));
   min-height: 0;
-  grid-template-columns: min(580px, 80vw, 100%);
+  grid-template-columns: min(680px, 75vw, 100%);
   grid-template-rows: var(--edge-height) auto var(--edge-height);
   justify-content: center;
   perspective: 950px;
   perspective-origin: 50% 46%;
 }
 .stack-compact .deck-shadow { display: none; }
-.stack-compact .deck-card {
+@media (min-width: 1051px) {
+  .topic-layout .stack-compact, .value-navigation-layout .stack-compact {
+    grid-template-columns: min(680px, calc(100% - 104px));
+  }
+}
+@media (max-width: 700px) {
+  .stack-compact { grid-template-columns: min(82vw, 100%); }
+}
+.stack-hinge {
   grid-area: 2 / 1;
+  display: grid;
   width: 100%;
-  height: auto;
-  aspect-ratio: 680 / 430;
-  min-height: 0;
-  padding-block: 24px 56px;
-  border-radius: 2px;
-  background: linear-gradient(#f8efdb, #efe2c4);
-  box-shadow: 0 3px 9px #392c1d55;
+  min-width: 0;
+  perspective: 950px;
+  perspective-origin: center bottom;
+  z-index: 3;
 }
-.stack-compact .deck-card h2 {
-  margin-top: 10px;
-  margin-bottom: 9px;
-  font: bold italic clamp(21px, 2.5vw, 32px)/1.1 Georgia, serif;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-  overflow-wrap: anywhere;
+.stack-hinge .deck-card {
+  grid-area: 1 / 1;
+  width: 100%;
+  min-width: 0;
+  z-index: 1;
+  transform: none;
+  transform-origin: center bottom;
+  animation: none;
+  will-change: auto;
 }
-.stack-compact .rule { margin-block: 10px; }
-.stack-compact .card-thumbs { top: 60px; right: 14px; gap: 6px; }
-.stack-compact .card-thumbs button { width: 96px; height: 66px; }
-.stack-compact:has(.card-thumbs) .deck-card { padding-right: 124px; }
-.stack-compact:has(.card-thumbs) .deck-card footer { right: 124px; }
-.stack-compact .deck-card[data-flip-direction="next"] { animation: flip-from-behind .28s cubic-bezier(.2,.72,.24,1); transform-origin: center bottom; }
-.stack-compact .deck-card[data-flip-direction="previous"] { animation: flip-from-front .28s cubic-bezier(.2,.72,.24,1); transform-origin: center bottom; }
+.stack-hinge [data-stack-layer=covered] { pointer-events: none; z-index: 0; }
+.stack-hinge .deck-card[data-hinge-motion] { z-index: 2; will-change: transform; }
+.stack-hinge .deck-card[data-hinge-motion=fall] { animation: hinge-fall .28s cubic-bezier(.2,.72,.24,1) both; }
+.stack-hinge .deck-card[data-hinge-motion=rise] { animation: hinge-rise .28s cubic-bezier(.2,.72,.24,1) both; }
+.deck-card[data-preview-transition] { animation: none; transform: none; }
 .card-pile {
   position: relative;
   width: 100%;
@@ -173,21 +177,11 @@
 .deck-edit { flex: none; border: 0; background: transparent; color: #874b34; padding: 0; font: inherit; font-weight: bold; text-transform: uppercase; cursor: pointer; }
 .deck-edit:hover { text-decoration: underline; }
 .flip { touch-action: manipulation; }
-@keyframes flip-from-behind {
-  from { transform: rotateX(52deg); }
-  to { transform: rotateX(0); }
-}
-@keyframes flip-from-front {
-  from { transform: rotateX(-52deg); }
-  to { transform: rotateX(0); }
-}
+@keyframes hinge-fall { from { transform: rotateX(0); } to { transform: rotateX(-89deg); } }
+@keyframes hinge-rise { from { transform: rotateX(-89deg); } to { transform: rotateX(0); } }
 @media (prefers-reduced-motion: reduce) {
-  .stack-compact .deck-card[data-flip-direction] { animation: none; }
-}
-@media (max-width: 620px) {
-  .stack-compact:has(.card-thumbs) .deck-card { padding-right: 93px; }
-  .stack-compact:has(.card-thumbs) .deck-card footer { right: 12px; }
-  .stack-compact .card-thumbs button { width: 68px; height: 50px; }
+  .stack-hinge .deck-card[data-hinge-motion] { animation: none; }
+  .stack-hinge [data-stack-layer=covered] { display: none; }
 }
 
 .deck-card{animation:deal-smooth .28s cubic-bezier(.2,.72,.24,1);will-change:transform,opacity;backface-visibility:hidden}.deck-shadow{transition:transform .28s cubic-bezier(.2,.72,.24,1),box-shadow .28s ease}@keyframes deal-smooth{0%{opacity:.15;transform:translate3d(34px,5px,0) rotate(.7deg) scale(.992)}100%{opacity:1;transform:translate3d(0,0,0) rotate(0) scale(1)}}@media(prefers-reduced-motion:reduce){.deck-card{animation:none}.deck-shadow{transition:none}}

@@ -1,8 +1,8 @@
 "use client";
 
-import { memo, startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
+import { memo, startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
 import { FigureGrid, FigureLightbox, type Figure } from "./figures";
-import { FlipButton, FLIP_INTERVAL_MS } from "./flip-button";
+import { FlipButton, useFlipRepeat } from "./flip-button";
 import { useLibrarySave } from "./library-save";
 import { CardLinkPicker, RichField } from "./rich-field";
 import { inlineCardIds, linkedCardId, remapInlineLinks, safeRichHtml, type LinkableCard } from "./rich-text";
@@ -307,10 +307,41 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const [open, setOpen] = useState<Card | null>(null);
   const [sort, setSort] = useState("project");
   const [hasDraft, setHasDraft] = useState(false);
-  const [navigation, setNavigation] = useState<{ position: number; direction?: "next" | "previous" }>({ position: 0 });
-  const lastKeyFlip = useRef(0);
+  type Motion = { card: Card; position: number; direction: "next" | "previous"; previewLines: string };
+  const [navigation, setNavigation] = useState<{ position: number; motion?: Motion }>({ position: 0 });
+  const { start: startKeyFlip, stop: stopKeyFlip } = useFlipRepeat();
+  const previewLines = useRef("2");
   const setPosition = useCallback((position: number) => setNavigation({ position }), []);
   const [previewExpanded,setPreviewExpanded]=useState(false);
+  const previewBounds = useRef<DOMRect | null>(null);
+  function togglePreview() {
+    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      previewBounds.current = cardPreviewRef.current?.getBoundingClientRect() ?? null;
+    }
+    setPreviewExpanded(value => !value);
+    setNavigation(current => current.motion ? { position: current.position } : current);
+  }
+  useLayoutEffect(() => {
+    const before = previewBounds.current;
+    const card = cardPreviewRef.current;
+    previewBounds.current = null;
+    if (!before || !card) return;
+    card.dataset.previewTransition = "";
+    const after = card.getBoundingClientRect();
+    if (!after.width || !after.height) {
+      delete card.dataset.previewTransition;
+      return;
+    }
+    const transform = `translate(${before.left - after.left}px, ${before.top - after.top}px)
+      scale(${before.width / after.width}, ${before.height / after.height})`;
+    const animation = card.animate(
+      [{ transformOrigin: "top left", transform }, { transformOrigin: "top left", transform: "none" }],
+      { duration: 260, easing: "cubic-bezier(.2,.72,.24,1)" },
+    );
+    const cleanup = () => { delete card.dataset.previewTransition; };
+    animation.onfinish = cleanup;
+    return () => { animation.cancel(); cleanup(); };
+  }, [previewExpanded]);
   const [duplicatesOnly,setDuplicatesOnly]=useState(false);
   const [kind, setKind] = useState<Collection>("paper");
   const [groupBy,setGroupBy]=useState<GroupBy>(initialGroupBy);
@@ -487,15 +518,26 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const lastPosition = Math.max(0, deckItems.length - 1);
   const boundedPosition = Math.min(navigation.position, lastPosition);
   const flipTo = useCallback((destination: (position: number) => number) => {
+    const animate = !previewExpanded && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const lines = previewLines.current;
     setNavigation(previous => {
       const position = Math.min(previous.position, lastPosition);
       const next = Math.max(0, Math.min(lastPosition, destination(position)));
-      return next === position ? previous : { position: next, direction: next > position ? "next" : "previous" };
+      if (next === position) return previous;
+      const card = deckItems[position]?.card;
+      return { position: next, motion: animate && card ? {
+        card, position, direction: next > position ? "next" : "previous", previewLines: lines,
+      } : undefined };
     });
-  }, [lastPosition]);
+  }, [deckItems, lastPosition, previewExpanded]);
+  const finishFlip = useCallback((motion: Motion) => {
+    setNavigation(current => current.motion === motion ? { position: current.position } : current);
+  }, []);
   const nextCard = useCallback(() => flipTo(position => position + 1), [flipTo]);
   const previousCard = useCallback(() => flipTo(position => position - 1), [flipTo]);
   useEffect(() => {
+    let heldKey = "";
+    const stopRepeating = () => { heldKey = ""; stopKeyFlip(); };
     const key = (event: KeyboardEvent) => {
       if (event.defaultPrevented || !(event.target instanceof HTMLElement)) return;
       const target = event.target;
@@ -516,18 +558,28 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
       const back = event.key === "ArrowLeft" || (vertical && event.key === "ArrowDown");
       if (!forward && !back) return;
       event.preventDefault();
-      const now = performance.now();
-      if (event.repeat && now - lastKeyFlip.current < FLIP_INTERVAL_MS) return;
-      lastKeyFlip.current = now;
-      if (forward) nextCard();
-      else previousCard();
+      if (event.repeat) return;
+      heldKey = event.code || event.key;
+      const step = forward ? nextCard : previousCard;
+      startKeyFlip(() => {
+        if (openCardRef.current || document.querySelector("[aria-modal=true]")) stopRepeating();
+        else step();
+      });
     };
+    const release = (event: KeyboardEvent) => { if ((event.code || event.key) === heldKey) stopRepeating(); };
     window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
-  }, [kind, ready, flushAndSave, nextCard, previousCard, previewExpanded]);
+    window.addEventListener("keyup", release);
+    window.addEventListener("pointerdown", stopRepeating);
+    return () => {
+      stopRepeating();
+      window.removeEventListener("keydown", key);
+      window.removeEventListener("keyup", release);
+      window.removeEventListener("pointerdown", stopRepeating);
+    };
+  }, [kind, ready, flushAndSave, nextCard, previousCard, previewExpanded, startKeyFlip, stopKeyFlip]);
   const currentItem=deckItems[boundedPosition];
   const current=currentItem?.type==="card"?currentItem.card:null;
-  useEffect(()=>{const card=cardPreviewRef.current;if(!card||previewExpanded)return;const fit=()=>{const finding=card.querySelector<HTMLElement>(".finding.rich-preview"),footer=card.querySelector<HTMLElement>("footer"),tags=card.querySelector<HTMLElement>(".tags"),matches=card.querySelector<HTMLElement>(".search-matches");if(!finding||!footer)return;const lineHeight=parseFloat(getComputedStyle(finding).lineHeight)||24;const reserve=matches?Math.min(62,matches.scrollHeight+10):tags&&tags.children.length?Math.min(62,tags.scrollHeight+22):8;const available=Math.max(lineHeight,footer.offsetTop-finding.offsetTop-reserve);card.style.setProperty("--preview-lines",String(Math.max(1,Math.min(8,Math.floor(available/lineHeight)))))};fit();if(typeof ResizeObserver==="undefined")return;const observer=new ResizeObserver(fit);observer.observe(card);return()=>observer.disconnect()},[current?.id,current?.title,current?.findings,current?.keywords.length,deferredQuery,previewExpanded]);
+  useEffect(()=>{const card=cardPreviewRef.current;if(!card||previewExpanded)return;const fit=()=>{const finding=card.querySelector<HTMLElement>(".finding.rich-preview"),footer=card.querySelector<HTMLElement>("footer"),tags=card.querySelector<HTMLElement>(".tags"),matches=card.querySelector<HTMLElement>(".search-matches");if(!finding||!footer)return;const lineHeight=parseFloat(getComputedStyle(finding).lineHeight)||24;const reserve=matches?Math.min(62,matches.scrollHeight+10):tags&&tags.children.length?Math.min(62,tags.scrollHeight+22):8;const available=Math.max(lineHeight,footer.offsetTop-finding.offsetTop-reserve);previewLines.current=String(Math.max(1,Math.min(8,Math.floor(available/lineHeight))));card.style.setProperty("--preview-lines",previewLines.current)};fit();if(typeof ResizeObserver==="undefined")return;const observer=new ResizeObserver(fit);observer.observe(card);return()=>observer.disconnect()},[current?.id,current?.title,current?.findings,current?.keywords.length,deferredQuery,previewExpanded]);
   const kindCards=useMemo(()=>deferredCards.filter(c=>(c.kind||"paper")===kind),[deferredCards,kind]);
   const matchingKindCards=useMemo(()=>kindCards.filter(card=>{const meta=cardMetadata.get(card.id)!;return(!queryNeedle||meta.search.includes(queryNeedle))&&(kind!=="paper"||!duplicatesOnly||(duplicateTitleCounts.get(meta.duplicateKey)||0)>1)}),[kindCards,cardMetadata,queryNeedle,kind,duplicatesOnly,duplicateTitleCounts]);
   const allTags=useMemo(()=>Array.from(new Set(kindCards.flatMap(c=>getCardMeta(c).keywords))).sort(),[kindCards]);
@@ -861,6 +913,26 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     }
   }
 
+  function renderDeckCard(card: Card, position: number, active: boolean, motion?: Motion) {
+    const hinge = motion?.direction === "next" && !active ? "fall" : motion?.direction === "previous" && active ? "rise" : undefined;
+    return <article ref={active ? cardPreviewRef : undefined}
+      className={`note-card deck-card ${kind}-card ${previewExpanded ? "preview-expanded" : ""}`}
+      key={`${active ? "active" : "covered"}-${card.id}`} data-stack-layer={active ? "active" : "covered"}
+      data-hinge-motion={hinge} inert={!active} aria-hidden={active ? undefined : true}
+      style={active ? undefined : { "--preview-lines": motion?.previewLines } as CSSProperties}
+      onAnimationEnd={hinge && motion ? event => { if (event.target === event.currentTarget) finishFlip(motion); } : undefined}
+      draggable={active}
+      onDragStart={active ? e => e.dataTransfer.setData("text/plain", String(card.id)) : undefined}
+      onClick={active ? () => previewExpanded ? openCard(card) : togglePreview() : undefined}>
+          <div className="card-number" aria-live={active ? "polite" : undefined}>{String(position+1).padStart(2,"0")} / {String(deckItems.length).padStart(2,"0")}</div>{kind==="paper"?<span className={`status-dot ${cardCategories(card)[0]?.toLowerCase().replace(" ","-")||"uncategorized"}`}>{cardCategories(card).join(" · ")||"Uncategorized"}</span>:<span className="status-dot">{cardCategories(card).join(" · ") || kind}</span>}{(duplicateTitleCounts.get(duplicateTitleKey(card))||0)>1&&<span className="duplicate-mark" title="Another paper card has the same title">Duplicate title ×{duplicateTitleCounts.get(duplicateTitleKey(card))}</span>}
+          {(()=>{const current=card;const matchedDetails=deferredQuery.trim()?[['Methods',current.methods],['Limitations',current.limitations],['My notes',plain(current.notes)]].filter(([,text])=>text.toLowerCase().includes(deferredQuery.trim().toLowerCase())).map(([label,text])=>[label,searchExcerpt(text,deferredQuery)]):[];return <>
+          <h2><HighlightText text={current.title} term={deferredQuery}/></h2>{kind !== "note" && <><p className="citation"><HighlightText text={kind==="paper"?firstAuthor(current.authors):current.authors} term={deferredQuery}/>{current.year&&<> · <HighlightText text={current.year} term={deferredQuery}/></>}</p><p className="journal"><HighlightText text={current.journal} term={deferredQuery}/>{current.doi&&<> · <a href={`https://doi.org/${current.doi.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i,"")}`} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()}>DOI</a></>}</p></>}{kind === "journal" && <JournalSummary card={current} term={deferredQuery}/>}<div className="rule"/>
+          <RichPreview className="finding rich-preview" html={kind === "note" ? current.notes : current.findings} term={deferredQuery} onOpenCard={openLinkedCard} compact={!previewExpanded}/>{previewExpanded && kind !== "note" &&<div className="preview-details">{current.methods&&<p><b>Methods:</b> <HighlightText text={current.methods} term={deferredQuery}/></p>}{current.limitations&&<p><b>Limitations:</b> <HighlightText text={current.limitations} term={deferredQuery}/></p>}{plain(current.notes)&&<div className="preview-rich-row"><b>My notes:</b><RichPreview className="rich-preview compact" html={current.notes} term={deferredQuery} onOpenCard={openLinkedCard}/></div>}</div>}{kind !== "note" && !previewExpanded&&matchedDetails.length>0&&<div className="search-matches">{matchedDetails.map(([label,text])=><p key={label}><b>{label}</b><span><HighlightText text={text} term={deferredQuery}/></span></p>)}</div>}<div className="tags">{current.keywords.slice(0,previewExpanded?12:4).map(t=><button key={t} onClick={e=>{e.stopPropagation();searchCards(t)}}><HighlightText text={t} term={deferredQuery}/></button>)}</div>
+          {!!current.images?.length&&<div className="card-thumbs">{current.images.slice(0,3).map((image,i)=><button type="button" key={image.id} aria-label={`Enlarge ${image.name}`} onClick={e=>{e.stopPropagation();showFigure(current.id, image.id)}} style={{transform:`rotate(${i%2?2:-2}deg)`}}><img src={image.data} alt={image.name}/></button>)}{current.images.length>3&&<em>+{current.images.length-3}</em>}</div>}
+          <footer><span title={current.projects.join(" › ")}>{current.projects.join(" › ") || (kind==="paper"?"Unfiled":kind==="author"?"Author card":kind==="note"?"Note card":"Journal card")}</span><button type="button" className="deck-edit" onClick={event => { event.stopPropagation(); openCard(current); }}>Read &amp; edit ↗</button></footer></>})()}
+        </article>
+  }
+
   return <main className="app-shell">
     <header className="topbar">
       <div className="brand"><span className="brand-mark">L</span><div><h1>{displayName}</h1><p>{displayedCardCount} cards · stored on this device</p></div></div>
@@ -906,23 +978,18 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     <section className="deck-area">
       <div className="deck-heading"><span>{visible.length} {visible.length===1?"card":"cards"} in this stack</span>
         <button type="button" className={previewExpanded ? "global-preview-toggle active" : "global-preview-toggle"}
-          onClick={() => setPreviewExpanded(value => !value)}>{previewExpanded ? "Back to stack" : "Expand cards"}</button>
+          onClick={togglePreview}>{previewExpanded ? "Back to stack" : "Expand cards"}</button>
         <span>{previewExpanded ? "Hold ← or → to flip" : "Hold either pile or ← → to flip"}</span>
       </div>
       {currentItem ? <div className={previewExpanded ? "deck-wrap" : "deck-wrap stack-compact"}>
         {previewExpanded ? <FlipButton className="flip prev" label="Previous card" disabled={boundedPosition === 0} onFlip={previousCard}>←</FlipButton>
           : deckItems[boundedPosition + 1] && <CardPile card={deckItems[boundedPosition + 1].card} count={lastPosition - boundedPosition} direction="next" onFlip={nextCard}/>}
         <div className="deck-shadow shadow-three"/><div className="deck-shadow shadow-two"/><div className="deck-shadow shadow-one"/>
-        <article ref={cardPreviewRef} className={`note-card deck-card ${kind}-card ${previewExpanded?"preview-expanded":""}`} key={currentItem.card.id} data-flip-direction={navigation.direction} draggable
-          onDragStart={e => e.dataTransfer.setData("text/plain", String(currentItem.card.id))}
-          onClick={() => previewExpanded ? openCard(currentItem.card) : setPreviewExpanded(true)}>
-          <div className="card-number" aria-live="polite">{String(boundedPosition+1).padStart(2,"0")} / {String(deckItems.length).padStart(2,"0")}</div>{kind==="paper"?<span className={`status-dot ${cardCategories(currentItem.card)[0]?.toLowerCase().replace(" ","-")||"uncategorized"}`}>{cardCategories(currentItem.card).join(" · ")||"Uncategorized"}</span>:<span className="status-dot">{cardCategories(currentItem.card).join(" · ") || kind}</span>}{(duplicateTitleCounts.get(duplicateTitleKey(currentItem.card))||0)>1&&<span className="duplicate-mark" title="Another paper card has the same title">Duplicate title ×{duplicateTitleCounts.get(duplicateTitleKey(currentItem.card))}</span>}
-          {(()=>{const current=currentItem.card;const matchedDetails=deferredQuery.trim()?[['Methods',current.methods],['Limitations',current.limitations],['My notes',plain(current.notes)]].filter(([,text])=>text.toLowerCase().includes(deferredQuery.trim().toLowerCase())).map(([label,text])=>[label,searchExcerpt(text,deferredQuery)]):[];return <>
-          <h2><HighlightText text={current.title} term={deferredQuery}/></h2>{kind !== "note" && <><p className="citation"><HighlightText text={kind==="paper"?firstAuthor(current.authors):current.authors} term={deferredQuery}/>{current.year&&<> · <HighlightText text={current.year} term={deferredQuery}/></>}</p><p className="journal"><HighlightText text={current.journal} term={deferredQuery}/>{current.doi&&<> · <a href={`https://doi.org/${current.doi.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i,"")}`} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()}>DOI</a></>}</p></>}{kind === "journal" && <JournalSummary card={current} term={deferredQuery}/>}<div className="rule"/>
-          <RichPreview className="finding rich-preview" html={kind === "note" ? current.notes : current.findings} term={deferredQuery} onOpenCard={openLinkedCard} compact={!previewExpanded}/>{previewExpanded && kind !== "note" &&<div className="preview-details">{current.methods&&<p><b>Methods:</b> <HighlightText text={current.methods} term={deferredQuery}/></p>}{current.limitations&&<p><b>Limitations:</b> <HighlightText text={current.limitations} term={deferredQuery}/></p>}{plain(current.notes)&&<div className="preview-rich-row"><b>My notes:</b><RichPreview className="rich-preview compact" html={current.notes} term={deferredQuery} onOpenCard={openLinkedCard}/></div>}</div>}{kind !== "note" && !previewExpanded&&matchedDetails.length>0&&<div className="search-matches">{matchedDetails.map(([label,text])=><p key={label}><b>{label}</b><span><HighlightText text={text} term={deferredQuery}/></span></p>)}</div>}<div className="tags">{current.keywords.slice(0,previewExpanded?12:4).map(t=><button key={t} onClick={e=>{e.stopPropagation();searchCards(t)}}><HighlightText text={t} term={deferredQuery}/></button>)}</div>
-          {!!current.images?.length&&<div className="card-thumbs">{current.images.slice(0,3).map((image,i)=><button type="button" key={image.id} aria-label={`Enlarge ${image.name}`} onClick={e=>{e.stopPropagation();showFigure(current.id, image.id)}} style={{transform:`rotate(${i%2?2:-2}deg)`}}><img src={image.data} alt={image.name}/></button>)}{current.images.length>3&&<em>+{current.images.length-3}</em>}</div>}
-          <footer><span title={current.projects.join(" › ")}>{current.projects.join(" › ") || (kind==="paper"?"Unfiled":kind==="author"?"Author card":kind==="note"?"Note card":"Journal card")}</span><button type="button" className="deck-edit" onClick={event => { event.stopPropagation(); openCard(current); }}>Read &amp; edit ↗</button></footer></>})()}
-        </article>
+        {previewExpanded ? renderDeckCard(currentItem.card, boundedPosition, true) :
+          <div className="stack-hinge">
+            {navigation.motion && renderDeckCard(navigation.motion.card, navigation.motion.position, false, navigation.motion)}
+            {renderDeckCard(currentItem.card, boundedPosition, true, navigation.motion)}
+          </div>}
         {previewExpanded ? <FlipButton className="flip next" label="Next card" disabled={boundedPosition >= lastPosition} onFlip={nextCard}>→</FlipButton>
           : deckItems[boundedPosition - 1] && <CardPile card={deckItems[boundedPosition - 1].card} count={boundedPosition} direction="previous" onFlip={previousCard}/>}
       </div> : <div className="empty"><b>No cards found</b><span>Try another phrase or divider.</span></div>}
