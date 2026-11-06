@@ -69,7 +69,7 @@ function createWindow(){
       void dialog.showMessageBox(win, {
         type: "error",
         message: displayName + " could not save your latest changes.",
-        detail: "Your edits are still open. Use Save now to try again before closing.",
+        detail: "Your edits are still open. Use Retry save in the app before closing again.",
       });
     }
   };
