@@ -1,0 +1,110 @@
+name: Publish verified Classic and Stacks installers
+on:
+  push:
+    branches: [codex/index-installer-transfer]
+permissions:
+  actions: read
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - edition: Classic
+            version: 3.2.2
+            run: 42243577272
+            commit: 02ee6f4e7688c3a389f6e826cc4d0948c95ed337
+            release: 436667155
+            latest: "true"
+          - edition: Stacks
+            version: 3.3.2
+            run: 42243734909
+            commit: 8060a235c921192c5da65f6f9dca81078cf640c4
+            release: 436667180
+            latest: "false"
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      EDITION: ${{ matrix.edition }}
+      VERSION: ${{ matrix.version }}
+      COMMIT: ${{ matrix.commit }}
+      BUILD_RUN: ${{ matrix.run }}
+      RELEASE_ID: ${{ matrix.release }}
+      MAKE_LATEST: ${{ matrix.latest }}
+    steps:
+      - name: Wait for the exact source build
+        run: |
+          gh run watch "$BUILD_RUN" --interval 12 --exit-status
+          gh run view "$BUILD_RUN" --json headSha,conclusion |
+            jq -e --arg commit "$COMMIT" '.headSha == $commit and .conclusion == "success"'
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ matrix.run }}
+          name: literature-box-windows-latest
+          path: windows
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ matrix.run }}
+          name: literature-box-macos-latest
+          path: macos
+      - name: Stage and verify installer formats
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from shutil import copyfile
+          import os
+          import re
+
+          version = os.environ["VERSION"]
+          edition = os.environ["EDITION"]
+          out = Path("installers")
+          out.mkdir()
+          title = f"Literature Box {edition}"
+          prefix = f"Literature-Box-{edition}-{version}"
+          exe = [p for p in Path("windows").rglob(f"*{version}.exe") if p.name.startswith(title)]
+          setup = [p for p in exe if "setup" in p.name.lower()]
+          portable = [p for p in exe if "setup" not in p.name.lower()]
+          assert len(setup) == len(portable) == 1, (setup, portable)
+          for files, label in ((setup, "Setup"), (portable, "Portable")):
+              source = files[0]
+              assert source.stat().st_size > 1_000_000
+              with source.open("rb") as file:
+                  assert file.read(2) == b"MZ"
+              copyfile(source, out / f"{prefix}-Windows-{label}.exe")
+          images = [p for p in Path("macos").rglob("*.dmg") if p.name.startswith(title) and version in p.name]
+          assert images, "Missing macOS disk image"
+          for source in images:
+              assert source.stat().st_size > 1_000_000
+              with source.open("rb") as file:
+                  file.seek(-512, 2)
+                  assert file.read(4) == b"koly"
+              arch = re.search(r"(?:-| )(x64|arm64|universal)\.dmg$", source.name, re.I)
+              suffix = "-" + arch.group(1) if arch else ""
+              copyfile(source, out / f"{prefix}-macOS{suffix}.dmg")
+          PY
+          sha256sum installers/*
+      - name: Upload verified files and publish
+        run: |
+          TAG="v$VERSION"
+          gh api "repos/$GH_REPO/releases/$RELEASE_ID" |
+            jq -e --arg commit "$COMMIT" --arg tag "$TAG" '.target_commitish == $commit and .tag_name == $tag'
+          for file in installers/*; do
+            name=$(basename "$file")
+            digest="sha256:$(sha256sum "$file" | cut -d' ' -f1)"
+            size=$(stat -c %s "$file")
+            asset=$(gh api "repos/$GH_REPO/releases/$RELEASE_ID/assets" | jq -c --arg name "$name" '.[] | select(.name == $name)')
+            if [ -z "$asset" ]; then
+              gh release upload "$TAG" "$file"
+              asset=$(gh api "repos/$GH_REPO/releases/$RELEASE_ID/assets" | jq -c --arg name "$name" '.[] | select(.name == $name)')
+            fi
+            jq -e --arg digest "$digest" --argjson size "$size" '.state == "uploaded" and .size == $size and (.digest == null or .digest == $digest)' <<< "$asset"
+          done
+          gh release edit "$TAG" --draft=false --latest="$MAKE_LATEST"
+          test "$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq .object.sha)" = "$COMMIT"
+          gh release view "$TAG" --json url,isDraft,assets
+
