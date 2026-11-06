@@ -116,7 +116,8 @@
 .stack-compact .deck-card {
   grid-area: 2 / 1;
   width: 100%;
-  height: clamp(260px, 36vh, 326px);
+  height: auto;
+  aspect-ratio: 680 / 430;
   min-height: 0;
   padding-block: 24px 56px;
   border-radius: 2px;
