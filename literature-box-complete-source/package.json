@@ -1,6 +1,6 @@
 {
   "name": "literature-box-desktop",
-  "version": "3.2.4",
+  "version": "3.2.5",
   "private": true,
   "main": "desktop/main.cjs",
   "engines": {
@@ -56,10 +56,10 @@
     "wrangler": "4.92.0"
   },
   "type": "module",
-  "displayName": "Literature Box Classic",
+  "displayName": "Scrinium Classic",
   "build": {
     "appId": "com.literaturebox.desktop",
-    "productName": "Literature Box Classic",
+    "productName": "Scrinium Classic",
     "files": ["desktop/**/*", "desktop-dist/**/*", "node_modules/**/*", "package.json"],
     "asarUnpack": ["node_modules/better-sqlite3/**/*"],
     "directories": {"output": "release"},

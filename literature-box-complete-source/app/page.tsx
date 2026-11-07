@@ -473,7 +473,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
         setReady(true);
       } catch (error) {
         if (!cancelled) setLoadError(true);
-        console.error("Literature Box load failed", error);
+        console.error("Scrinium load failed", error);
       }
     };
     void load();
@@ -503,7 +503,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
         future.current = [];
         applySnapshot(restored, snapshot.revision);
       } catch (error) {
-        console.error("Literature Box shared library refresh failed", error);
+        console.error("Scrinium shared library refresh failed", error);
       } finally {
         loading = false;
       }
@@ -856,13 +856,13 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     if (kind === "json") { body = JSON.stringify({ version: 3, ...library }, null, 2); type = "application/json"; }
     if (kind === "csv") { const keys = Object.keys(cards[0]) as (keyof Card)[]; body = [keys.join(","), ...cards.map(c => keys.map(k => `"${String(Array.isArray(c[k]) ? (c[k] as string[]).join("; ") : c[k]).replaceAll('"','""')}"`).join(","))].join("\n"); type="text/csv"; }
     if (kind === "md") body = cards.map(c => `# ${c.title}\n\n**${c.authors} (${c.year})** — ${c.journal}\n\n## Key findings\n${c.findings}\n\n## Methods\n${c.methods}\n\n## Limitations\n${c.limitations}\n\n## My notes\n${c.notes}\n`).join("\n---\n\n");
-    if(window.literatureBox){window.literatureBox.exportFile(kind,body);return} const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([body],{type})); a.download=`literature-box.${kind}`; a.click(); URL.revokeObjectURL(a.href);
+    if(window.literatureBox){window.literatureBox.exportFile(kind,body);return} const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([body],{type})); a.download=`scrinium.${kind}`; a.click(); URL.revokeObjectURL(a.href);
   }
   async function confirmClearAll(){
     if(clearConfirmation!=="DELETE ALL")return;
     const body=JSON.stringify({ version: 3, ...library },null,2);
     if(window.literatureBox){const saved=await window.literatureBox.exportFile("json",body);if(saved===false)return}
-    else{const a=document.createElement("a");const url=URL.createObjectURL(new Blob([body],{type:"application/json"}));a.href=url;a.download="literature-box-before-delete.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+    else{const a=document.createElement("a");const url=URL.createObjectURL(new Blob([body],{type:"application/json"}));a.href=url;a.download="scrinium-before-delete.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
     if(editorCommitTimer.current)clearTimeout(editorCommitTimer.current);editorCommitTimer.current=null;pendingCard.current=null;pendingRich.current={};discardStagedCards();draftStarted.current=0;setHasDraft(false);openCardRef.current=null;setReturnToCard(null);history.current.push(cards);future.current=[];setCards([]);setOpen(null);setPosition(0);setFilter("All cards");setProjectPath([]);setTopicOrder([]);setClearingAll(false);setClearConfirmation("");
   }
   function topicDocumentContent(){
@@ -871,10 +871,10 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     papers.forEach(card=>{const path=card.projects.length?card.projects.slice(0,5):["Unfiled"];path.forEach((level,i)=>{if(previous[i]!==level){content+=`<h${i+1} class="project-heading level-${i+1}">${escapeHtml(level)}</h${i+1}>`}});previous=path;content+=`<article><h2 class="paper-title">${escapeHtml(card.title)}</h2><p class="citation">${escapeHtml(card.authors)}${card.year?` (${escapeHtml(card.year)})`:""}${card.journal?` — <i>${escapeHtml(card.journal)}</i>`:""}</p>${card.doi?`<p class="doi">DOI: ${escapeHtml(card.doi)}</p>`:""}${card.findings?`<div class="paper-section"><b>Key findings:</b> ${safeRichHtml(card.findings)}</div>`:""}${card.images?.length?`<div class="figures">${card.images.map(image=>`<figure><img src="${escapeHtml(image.data)}"/><figcaption>${escapeHtml(image.caption || image.name).replace(/\n/g, "<br>")}</figcaption></figure>`).join("")}</div>`:""}${card.methods?`<p class="paper-section"><b>Method:</b> ${escapeHtml(card.methods)}</p>`:""}${card.limitations?`<p class="paper-section"><b>Limitations:</b> ${escapeHtml(card.limitations)}</p>`:""}${card.notes?`<div class="paper-section"><b>My notes:</b> ${safeRichHtml(card.notes)}</div>`:""}</article>`});
     return content||"<h1>No paper cards</h1>";
   }
-  const documentStyles=`body{font:11pt/1.55 Georgia,serif;color:#26211d;max-width:760px;margin:auto}h1{font-size:26pt;border-bottom:2px solid #6f442c;padding-bottom:8px;page-break-before:always}h1:first-child{page-break-before:auto}h2.project-heading{font-size:20pt;color:#60422f;border-bottom:1px solid #b9a58b}h3.project-heading{font-size:16pt;color:#72533d}h4.project-heading,h5.project-heading{font-size:13pt;color:#80644d}.paper-title{font-size:16pt;margin:0 0 5px;border:0;color:#251e19}.citation,.doi{margin:3px 0;color:#655c53}.doi{font-size:9pt}article{margin:20px 0 30px;padding:0 0 20px;border-bottom:1px solid #d8cdbc;page-break-inside:avoid}.paper-section{margin:9px 0}.paper-section>b{color:#5f4d41}.figures{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:12px 0}.figures figure{margin:0}.figures img{width:100%;max-height:260px;object-fit:contain}.figures figcaption{font-size:8pt;color:#756b61}`;
-  function exportWord(){download("doc",`<!doctype html><html><head><meta charset="utf-8"><title>Literature Box — by topic</title><style>${documentStyles}</style></head><body>${topicDocumentContent()}</body></html>`)}
+  const documentStyles=`body{font:11pt/1.55 "Palatino Linotype","Book Antiqua",Palatino,serif;color:#26211d;max-width:760px;margin:auto}h1{font-size:26pt;border-bottom:2px solid #6f442c;padding-bottom:8px;page-break-before:always}h1:first-child{page-break-before:auto}h2.project-heading{font-size:20pt;color:#60422f;border-bottom:1px solid #b9a58b}h3.project-heading{font-size:16pt;color:#72533d}h4.project-heading,h5.project-heading{font-size:13pt;color:#80644d}.paper-title{font-size:16pt;margin:0 0 5px;border:0;color:#251e19}.citation,.doi{margin:3px 0;color:#655c53}.doi{font-size:9pt}article{margin:20px 0 30px;padding:0 0 20px;border-bottom:1px solid #d8cdbc;page-break-inside:avoid}.paper-section{margin:9px 0}.paper-section>b{color:#5f4d41}.figures{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:12px 0}.figures figure{margin:0}.figures img{width:100%;max-height:260px;object-fit:contain}.figures figcaption{font-size:8pt;color:#756b61}`;
+  function exportWord(){download("doc",`<!doctype html><html><head><meta charset="utf-8"><title>Scrinium — by topic</title><style>${documentStyles}</style></head><body>${topicDocumentContent()}</body></html>`)}
   function exportPdf(){
-    const frame=document.createElement("iframe");frame.style.position="fixed";frame.style.right="0";frame.style.bottom="0";frame.style.width="0";frame.style.height="0";frame.style.border="0";document.body.appendChild(frame);const doc=frame.contentDocument;if(!doc)return;doc.open();doc.write(`<!doctype html><html><head><title>Literature Box — by topic</title><style>@page{margin:20mm}${documentStyles}@media print{body{max-width:none}}</style></head><body>${topicDocumentContent()}</body></html>`);doc.close();setTimeout(()=>{frame.contentWindow?.focus();frame.contentWindow?.print();setTimeout(()=>frame.remove(),1000)},250)}
+    const frame=document.createElement("iframe");frame.style.position="fixed";frame.style.right="0";frame.style.bottom="0";frame.style.width="0";frame.style.height="0";frame.style.border="0";document.body.appendChild(frame);const doc=frame.contentDocument;if(!doc)return;doc.open();doc.write(`<!doctype html><html><head><title>Scrinium — by topic</title><style>@page{margin:20mm}${documentStyles}@media print{body{max-width:none}}</style></head><body>${topicDocumentContent()}</body></html>`);doc.close();setTimeout(()=>{frame.contentWindow?.focus();frame.contentWindow?.print();setTimeout(()=>frame.remove(),1000)},250)}
 
   async function importJson(file: File) {
     try {
@@ -922,13 +922,13 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
       });
       if (Array.isArray(data.topicOrder)) setTopicOrder(current => Array.from(new Set([...current, ...data.topicOrder])));
     } catch {
-      alert("That file is not a valid Literature Box JSON backup.");
+      alert("That file is not a valid Scrinium JSON backup.");
     }
   }
 
   return <main className="app-shell">
     <header className="topbar">
-      <div className="brand"><span className="brand-mark">L</span><div><h1>{displayName}</h1><p>{displayedCardCount} cards · stored on this device</p></div></div>
+      <div className="brand"><span className="brand-mark">S</span><div><h1>{displayName}</h1><p>{displayedCardCount} cards · stored on this device</p></div></div>
       <div className="top-actions">
         <label className="import-btn">↥ Import<input type="file" accept=".json" onChange={e => e.target.files?.[0] && importJson(e.target.files[0])}/></label>
         <details className="export-menu"><summary>↓ Export</summary><div><button onClick={exportPdf}>PDF by topic</button><button onClick={exportWord}>Word by topic</button><button onClick={()=>download("md")}>Markdown</button><button onClick={()=>download("csv")}>CSV</button><button onClick={()=>download("json")}>JSON backup</button></div></details>

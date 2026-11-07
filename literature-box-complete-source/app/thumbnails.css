@@ -25,7 +25,7 @@
 .figure-lightbox figcaption { margin-top: 8px; max-width: min(1000px, 90vw); font: 14px/1.4 Arial, sans-serif; }
 .figure-lightbox figcaption p { margin: 5px 0 0; max-height: 12vh; overflow-y: auto; white-space: pre-wrap; }
 .figure-lightbox button { cursor: pointer; }
-.figure-lightbox-close { position: absolute; top: 8px; right: 20px; background: transparent; color: inherit; border: 0; font: 34px Georgia, serif; }
+.figure-lightbox-close { position: absolute; top: 8px; right: 20px; background: transparent; color: inherit; border: 0; font: 34px "Palatino Linotype","Book Antiqua",Palatino, serif; }
 .figure-navigation { display: flex; align-items: center; gap: 12px; font: 13px Arial, sans-serif; }
 .figure-navigation button { border: 1px solid #8c7865; border-radius: 5px; padding: 7px 12px; background: #4f3e31; color: inherit; }
 .figure-navigation button:disabled { opacity: .45; cursor: default; }
