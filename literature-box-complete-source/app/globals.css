@@ -119,6 +119,9 @@
 .stack-world { position: absolute; left: 160px; top: 160px; width: 680px; height: 430px; transform: rotateX(-25deg) rotateY(6deg); transform-origin: center bottom; transform-style: preserve-3d; transition: top .32s cubic-bezier(.2,.7,.25,1), transform .32s cubic-bezier(.2,.7,.25,1); }
 .stack-card-plane, .stack-paper { position: absolute; left: 0; bottom: 0; width: 680px; height: 430px; transform-origin: center bottom; transform-style: preserve-3d; }
 .stack-card-plane { transform: rotateX(28deg); transition: height .32s cubic-bezier(.2,.7,.25,1), transform .32s cubic-bezier(.2,.7,.25,1); }
+/* The empty camera/world planes must not intercept controls on sheets behind them. */
+.stack-projection, .stack-world { pointer-events: none; }
+.stack-card-plane { pointer-events: auto; }
 .stack-card-plane[data-plane-layer=covered] { pointer-events: none; }
 .stack-world .deck-card { position: absolute; inset: 0; width: 680px; height: 100%; min-height: 0; margin: 0; transform: translateZ(.2px); transform-origin: center bottom; backface-visibility: hidden; z-index: auto; animation: none; transition: height .32s cubic-bezier(.2,.7,.25,1), box-shadow .18s; overflow: clip; }
 .stack-world .deck-card:hover { transform: translateZ(.2px); }
