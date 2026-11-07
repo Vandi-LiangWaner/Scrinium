@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, type CSSProperties, type ReactNode } fr
 
 const POINTER_FLIP_INTERVAL_MS = 90;
 
-function useFlipRepeat() {
+export function useFlipRepeat() {
   const frame = useRef<number | null>(null);
   const stop = useCallback(() => {
     if (frame.current !== null) cancelAnimationFrame(frame.current);

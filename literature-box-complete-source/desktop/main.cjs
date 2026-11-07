@@ -92,6 +92,6 @@ app.on("will-quit", () => { if (database) database.kill(); });
 
 ipcMain.handle("cards:load", (_, revision) => requestDatabase("load", revision));
 ipcMain.handle("cards:save", (_, payload) => requestDatabase("save", payload));
-ipcMain.handle("cards:export",async(_,{kind,body})=>{const result=await dialog.showSaveDialog({defaultPath:`literature-box.${kind}`,filters:[{name:kind.toUpperCase(),extensions:[kind]}]});if(!result.canceled&&result.filePath)await fs.promises.writeFile(result.filePath,body);return !result.canceled});
+ipcMain.handle("cards:export",async(_,{kind,body})=>{const result=await dialog.showSaveDialog({defaultPath:`scrinium.${kind}`,filters:[{name:kind.toUpperCase(),extensions:[kind]}]});if(!result.canceled&&result.filePath)await fs.promises.writeFile(result.filePath,body);return !result.canceled});
 ipcMain.handle("cards:import",async()=>{const result=await dialog.showOpenDialog({properties:["openFile"],filters:[{name:"JSON backup",extensions:["json"]}]});if(result.canceled)return null;return JSON.parse(await fs.promises.readFile(result.filePaths[0],"utf8"))});
 ipcMain.handle("app:data-location",()=>databasePath());
