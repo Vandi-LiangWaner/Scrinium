@@ -15,13 +15,13 @@ jobs:
         include:
           - edition: Classic
             version: 3.2.6
-            run: 42368917559
-            commit: feb8486b98886ae1728aa7f1bb68d2cf4cb04184
+            run: 42370605063
+            commit: 6f42e6c70fd0b6aeb73fb22fd81a72dd6eb7d370
             release: 437537702
           - edition: Stacks
             version: 3.3.8
-            run: 42368929488
-            commit: 372fe6087544b8b322d0253aa79bb45d9f9ee2b5
+            run: 42370622377
+            commit: 917da0786a0168dfe8f082ed33dd5a7389e2f69b
             release: 437537709
     env:
       GH_REPO: ${{ github.repository }}
@@ -98,7 +98,7 @@ jobs:
             name=$(basename "$file")
             digest="sha256:$(sha256sum "$file" | cut -d' ' -f1)"
             size=$(stat -c %s "$file")
-            gh release upload "$TAG" "$file"
+            gh release upload "$TAG" "$file" --clobber
             asset=$(gh api "repos/$GH_REPO/releases/$RELEASE_ID/assets" | jq -c --arg name "$name" '.[] | select(.name == $name)')
             jq -e --arg digest "$digest" --argjson size "$size" '.state == "uploaded" and .size == $size and (.digest == null or .digest == $digest)' <<< "$asset"
           done
