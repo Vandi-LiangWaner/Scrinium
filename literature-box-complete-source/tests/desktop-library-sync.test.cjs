@@ -37,3 +37,36 @@ test("concurrent writes merge different fields and preserve overlapping edits as
   assert.equal(conflict.state.cards[1].notes, "Saved by Stacks");
   assert.notEqual(conflict.state.cards[1].id, card.id);
 });
+
+
+test("system category tabs keep their order through later card writes", () => {
+  const source = { cards: [{ id: 1, title: "Paper" }] };
+  const order = ["category:read", "uncategorized", "all"];
+  const reordered = applyLibraryChanges(source, {
+    ...changes(1, [{ key: "title", before: "Paper", after: "Paper" }]),
+    categoryOrder: { paper: { before: [], after: order } },
+  }, false, new Map());
+  const written = applyLibraryChanges(reordered.state, changes(1, [
+    { key: "title", before: "Paper", after: "Edited paper" },
+  ]), false, new Map());
+  assert.deepEqual(written.state.categoryOrder.paper, order);
+  assert.equal(written.state.cards[0].title, "Edited paper");
+});
+
+test("concurrent category reorders in different collections preserve both orders", () => {
+  const empty = { added: [], removed: [], updated: [], collectionCategories: {} };
+  const first = applyLibraryChanges({ cards: [] }, { ...empty,
+    categoryOrder: { author: { before: [], after: ["uncategorized", "all"] } },
+  }, false, new Map());
+  const second = applyLibraryChanges(first.state, { ...empty,
+    categoryOrder: { note: { before: [], after: ["category:reviews", "all", "uncategorized"] } },
+  }, true, new Map());
+  assert.deepEqual(second.state.categoryOrder.author, ["uncategorized", "all"]);
+  assert.deepEqual(second.state.categoryOrder.note, ["category:reviews", "all", "uncategorized"]);
+});
+
+test("libraries without category ordering migrate without inventing categories", () => {
+  const merged = mergeLegacyLibraries({ cards: [], statuses: ["Read"] }, null);
+  assert.deepEqual(merged.categoryOrder, { paper: [], author: [], journal: [], note: [] });
+  assert.deepEqual(merged.statuses, ["Read"]);
+});

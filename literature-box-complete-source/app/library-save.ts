@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import type { CategoryOrder } from "./category-tabs";
+
 type Card = { id: number };
 type CategoryCollection = "author" | "journal" | "note";
 type LibraryState = {
   cards: Card[];
   statuses: string[];
   topicOrder: string[];
+  categoryOrder: CategoryOrder;
   collectionCategories: Record<CategoryCollection, string[]>;
 };
 const collections = ["author", "journal", "note"] as const;
@@ -49,9 +52,13 @@ function libraryChanges(before: LibraryState | null, after: LibraryState) {
     const change = listChange(before?.collectionCategories[kind], after.collectionCategories[kind]);
     return change ? [[kind, change]] : [];
   }));
+  const categoryOrder = Object.fromEntries((["paper", ...collections] as const).flatMap(kind => {
+    const change = listChange(before?.categoryOrder[kind], after.categoryOrder[kind]);
+    return change ? [[kind, change]] : [];
+  }));
   if (!added.length && !removed.length && !updated.length && !statuses && !topicOrder &&
-      !Object.keys(collectionCategories).length) return null;
-  return { added, removed, updated, statuses, topicOrder, collectionCategories };
+      !Object.keys(collectionCategories).length && !Object.keys(categoryOrder).length) return null;
+  return { added, removed, updated, statuses, topicOrder, collectionCategories, categoryOrder };
 }
 
 async function stringifyOffThread(value: unknown): Promise<string> {
@@ -163,7 +170,8 @@ export function useLibrarySave<State extends LibraryState>(
     if (!ready) return;
     library.current = state;
     if (adopting.current?.cards === state.cards && adopting.current.statuses === state.statuses &&
-        adopting.current.topicOrder === state.topicOrder && adopting.current.collectionCategories === state.collectionCategories) {
+        adopting.current.topicOrder === state.topicOrder && adopting.current.collectionCategories === state.collectionCategories &&
+        adopting.current.categoryOrder === state.categoryOrder) {
       adopting.current = null;
       saved.current = state;
     }

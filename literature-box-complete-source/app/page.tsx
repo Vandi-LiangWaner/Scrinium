@@ -6,6 +6,7 @@ import { useLibrarySave } from "./library-save";
 import { CardLinkPicker, RichField } from "./rich-field";
 import { inlineCardIds, linkedCardId, remapInlineLinks, safeRichHtml, type LinkableCard } from "./rich-text";
 import { displayName } from "../package.json";
+import { CategoryTabs, emptyCategoryOrder, restoreCategoryOrder, type CategoryOrder } from "./category-tabs";
 
 const collectionLabels = { paper: "Papers", author: "Authors", journal: "Journals", note: "Notes" };
 type Collection = keyof typeof collectionLabels;
@@ -64,7 +65,7 @@ const firstAuthor=(value:string)=>value.split(/\s*;\s*|\s+(?:&|and)\s+/i).map(v=
 const yearNumber=(value:string)=>Number(value.match(/\b\d{4}\b/)?.[0]||0);
 const createdTime=(card:Card)=>card.createdAt||(card.id>1_000_000_000_000?card.id:0);
 const cardSearchText=(c:Card,categories=cardCategories(c))=>[c.title,c.authors,c.year,c.journal,c.doi,c.keywords.join(" "),c.projects.join(" "),categories.join(" "),plain(c.findings),c.methods,c.limitations,plain(c.notes),c.link,c.quartile,c.impactFactor,c.acceptanceRate,c.medianFirstDecision,...(c.images || []).map(figure => figure.caption)].join(" ").toLowerCase();
-type LibraryState={cards:Card[];statuses:string[];topicOrder:string[];collectionCategories:CollectionCategories};
+type LibraryState={cards:Card[];statuses:string[];topicOrder:string[];collectionCategories:CollectionCategories;categoryOrder:CategoryOrder};
 function restoreLibrary(raw: unknown, legacyExamples: boolean): LibraryState | null {
   const stored = (Array.isArray(raw) ? { cards: raw } : raw) as Partial<LibraryState> | null;
   if (!Array.isArray(stored?.cards)) return null;
@@ -91,6 +92,7 @@ function restoreLibrary(raw: unknown, legacyExamples: boolean): LibraryState | n
     cards,
     statuses: Array.isArray(stored.statuses) ? stored.statuses : defaultStatuses,
     topicOrder: Array.isArray(stored.topicOrder) ? stored.topicOrder : [],
+    categoryOrder: restoreCategoryOrder(stored.categoryOrder),
     collectionCategories: {
       author: stored.collectionCategories?.author || [],
       journal: stored.collectionCategories?.journal || [],
@@ -363,6 +365,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const [statuses,setStatuses]=useState(defaultStatuses);
   const [collectionCategories, setCollectionCategories] = useState<CollectionCategories>({ author: [], journal: [], note: [] });
   const [topicOrder,setTopicOrder]=useState<string[]>([]);
+  const [categoryOrder, setCategoryOrder] = useState<CategoryOrder>(emptyCategoryOrder);
   const [editingStatuses,setEditingStatuses]=useState<Collection | null>(null);
   const [statusDraft,setStatusDraft]=useState(defaultStatuses);
   const [editingValues,setEditingValues]=useState<"keyword"|"project"|null>(null);
@@ -386,7 +389,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const closingSave = useRef<Promise<boolean> | null>(null);
   const closingDrafts = useRef(new Map<number, () => Card>());
   const pendingRich = useRef<Partial<Record<"findings" | "notes", () => string>>>({});
-  const library = useMemo(() => ({ cards, statuses, topicOrder, collectionCategories }), [cards, statuses, topicOrder, collectionCategories]);
+  const library = useMemo(() => ({ cards, statuses, topicOrder, collectionCategories, categoryOrder }), [cards, statuses, topicOrder, collectionCategories, categoryOrder]);
   const { status: saveStatus, saveNow, stageCard, stagedCard, discardStagedCards, hasUnsaved, adoptSnapshot, snapshotRevision } = useLibrarySave(library, ready, saveBrowserState);
   const takeDraft = useCallback(() => {
     if (editorCommitTimer.current) clearTimeout(editorCommitTimer.current);
@@ -457,6 +460,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     setCards(snapshot.cards);
     setStatuses(snapshot.statuses);
     setTopicOrder(snapshot.topicOrder);
+    setCategoryOrder(snapshot.categoryOrder);
     setCollectionCategories(snapshot.collectionCategories);
   }, [adoptSnapshot]);
 
@@ -761,6 +765,11 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
       const updated = existing.map(value => renamed.get(value.toLowerCase()) ?? value).filter(Boolean);
       return sameStrings(existing, updated) ? card : withCategories(card, updated);
     }));
+    setCategoryOrder(current => ({ ...current, [editingStatuses]: current[editingStatuses].flatMap(id => {
+      if (!id.startsWith("category:")) return [id];
+      const name = renamed.get(id.slice(9));
+      return name === undefined ? [id] : name ? [categoryFilter(name)] : [];
+    }) }));
     storeCategories(editingStatuses, next);
     selectFilter("All cards");
     setEditingStatuses(null);
@@ -920,6 +929,11 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
         };
         return { author: merge("author"), journal: merge("journal"), note: merge("note") };
       });
+      if (data.categoryOrder) setCategoryOrder(current => {
+        const imported = restoreCategoryOrder(data.categoryOrder);
+        return Object.fromEntries((Object.keys(current) as Collection[]).map(collection =>
+          [collection, Array.from(new Set([...current[collection], ...imported[collection]]))])) as CategoryOrder;
+      });
       if (Array.isArray(data.topicOrder)) setTopicOrder(current => Array.from(new Set([...current, ...data.topicOrder])));
     } catch {
       alert("That file is not a valid Scrinium JSON backup.");
@@ -951,18 +965,15 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     {kind==="paper"&&<nav className="dividers organizer-tabs" aria-label="Choose organization">
       {([['all','All cards'],['project','Topics'],['status','Categories'],['keyword','Keywords'],['author','Authors']] as const).map(([value,label])=><button key={value} className={groupBy===value?"active":""} onClick={()=>{setGroupBy(value);selectFilter("All cards");setProjectPath([]);setIntroExpanded(false)}}><span>{label}</span>{value==="all"&&<em>{visible.length}</em>}</button>)}
     </nav>}
-    {(kind !== "paper" || groupBy === "status") && <nav className="dividers value-tabs" aria-label="Card categories">
-      {kind !== "paper" && <button className={filter === "All cards" ? "active" : ""} onClick={() => selectFilter("All cards")}><span>All cards</span><em>{matchingKindCards.length}</em></button>}
-      <button className={filter==="Without category"?"active":""} onClick={()=>selectFilter("Without category")}><span>Without category</span><em>{facetCounts.statusesMap.get("")||0}</em></button>
-      {categoryLists[kind].map(category => <button key={category} className={filter === categoryFilter(category) ? "active" : ""}
-        onClick={() => selectFilter(categoryFilter(category))} onDragOver={e => e.preventDefault()} onDrop={e => {
-          const id = Number(e.dataTransfer.getData("text/plain"));
-          change(cards => cards.map(card => card.id === id && (card.kind || "paper") === kind
-            ? withCategories(card, [...cardCategories(card), category]) : card));
-          selectFilter(categoryFilter(category));
-        }}><span>{category}</span><em>{facetCounts.statusesMap.get(category.toLowerCase()) || 0}</em></button>)}
-      <button className="edit-statuses" onClick={() => editCategories(kind)}>＋ Edit categories</button>
-    </nav>}
+    {(kind !== "paper" || groupBy === "status") && <CategoryTabs collection={kind}
+      categories={categoryLists[kind]} order={categoryOrder[kind]} selected={filter} total={matchingKindCards.length}
+      unfiled={facetCounts.statusesMap.get("") || 0} count={category => facetCounts.statusesMap.get(category.toLowerCase()) || 0}
+      onSelect={selectFilter} onOrder={ids => setCategoryOrder(current => ({ ...current, [kind]: ids }))}
+      onEdit={() => editCategories(kind)} onDropCard={(id, category) => {
+        change(cards => cards.map(card => card.id === id && (card.kind || "paper") === kind
+          ? withCategories(card, [...cardCategories(card), category]) : card));
+        selectFilter(categoryFilter(category));
+      }}/>}
     <div className={kind==="paper"&&groupBy==="project"?"topic-layout":kind==="paper"&&(groupBy==="keyword"||groupBy==="author")?"value-navigation-layout":""}>
     {kind==="paper"&&groupBy==="project"&&<aside className="topic-navigation-panel"><TopicNavigation paths={existingTopicPaths} selected={projectPath} onSelect={selectProjectPath} onEdit={editCurrentTabs} onDropCard={(id,path)=>change(cs=>cs.map(card=>card.id===id?{...card,projects:path}:card))} onReorder={reorderTopic} onRename={renameTopic} customOrder={topicOrder} count={topicCount} total={matchingKindCards.length} unfiledCount={matchingKindCards.filter(card=>!card.projects.length).length} showUnfiled={filter==="Without topic"} onSelectUnfiled={()=>{setProjectPath([]);selectFilter("Without topic")}}/>{projectPath.length>0&&<div className="topic-intro-panel"><nav className="topic-breadcrumb" aria-label="Topic path"><button onClick={()=>selectProjectPath([])}>Topics</button>{projectPath.map((level,i)=><button key={`${level}-${i}`} className={i===projectPath.length-1?"active":""} onClick={()=>selectProjectPath(projectPath.slice(0,i+1))}>› {level}</button>)}</nav><div className="topic-intro-trail">{topicTrail.map((item,i)=>{const html=item.card?.findings||"";const current=i===topicTrail.length-1;return <section key={item.path.join("/")} className={current?"topic-intro-item current":"topic-intro-item"} role="button" tabIndex={0} onClick={()=>item.card&&openCard(item.card)} onKeyDown={e=>{if((e.key==="Enter"||e.key===" ")&&item.card)openCard(item.card)}}><small>{i===0?"Topic":`Level ${i+1}`}</small><h2>{item.level}</h2>{html?<RichPreview html={html} className={`topic-intro-content ${current&&introExpanded?"expanded":""}`} onOpenCard={openLinkedCard}/>:<p className="topic-intro-content">No introduction yet.</p>}<em>Edit introduction ↗</em></section>})}</div>{plain(selectedProjectCard?.findings||"").length>220&&<button className="intro-toggle" onClick={()=>setIntroExpanded(v=>!v)}>{introExpanded?"Show less":"Show more"}</button>}</div>}</aside>}
 
