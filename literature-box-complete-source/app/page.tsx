@@ -2,7 +2,7 @@
 
 import { memo, startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
 import { FigureGrid, FigureLightbox, type Figure } from "./figures";
-import { FlipButton, useFlipRepeat } from "./flip-button";
+import { FlipButton } from "./flip-button";
 import { useLibrarySave } from "./library-save";
 import { CardLinkPicker, RichField } from "./rich-field";
 import { inlineCardIds, linkedCardId, remapInlineLinks, safeRichHtml, type LinkableCard } from "./rich-text";
@@ -66,6 +66,39 @@ const yearNumber=(value:string)=>Number(value.match(/\b\d{4}\b/)?.[0]||0);
 const createdTime=(card:Card)=>card.createdAt||(card.id>1_000_000_000_000?card.id:0);
 const cardSearchText=(c:Card,categories=cardCategories(c))=>[c.title,c.authors,c.year,c.journal,c.doi,c.keywords.join(" "),c.projects.join(" "),categories.join(" "),plain(c.findings),c.methods,c.limitations,plain(c.notes),c.link,c.quartile,c.impactFactor,c.acceptanceRate,c.medianFirstDecision,...(c.images || []).map(figure => figure.caption)].join(" ").toLowerCase();
 type LibraryState={cards:Card[];statuses:string[];topicOrder:string[];collectionCategories:CollectionCategories};
+function restoreLibrary(raw: unknown, legacyExamples: boolean): LibraryState | null {
+  const stored = (Array.isArray(raw) ? { cards: raw } : raw) as Partial<LibraryState> | null;
+  if (!Array.isArray(stored?.cards)) return null;
+  const cards = stored.cards.map((card, index) => withCategories({
+    ...card,
+    createdAt: card.createdAt || (card.id > 1_000_000_000_000 ? card.id : 1704067200000 + index),
+    kind: card.kind || "paper",
+    keywords: Array.from(new Set([...(card.keywords || []), ...(card.topics || []), ...(card.subtopics || [])])),
+    topics: [], subtopics: [],
+  }, cardCategories(card)));
+  if (legacyExamples) {
+    for (const collection of ["author", "journal"] as const) {
+      if (cards.some(card => card.kind === collection)) continue;
+      const sample = seed.find(card => card.kind === collection)!;
+      cards.push({ ...sample, createdAt: Date.now(), keywords: Array.from(new Set([...sample.keywords, ...sample.topics])), topics: [] });
+    }
+    const existingProjects = new Set(cards.filter(card => card.kind === "project").map(card => card.projects.join(" > ")));
+    const topicNames = new Set(cards.filter(card => card.kind === "paper").map(card => card.projects[0]).filter(Boolean));
+    Array.from(topicNames).forEach((title, index) => {
+      if (!existingProjects.has(title)) cards.push({ ...blank("project"), id: 4000 + index, title, projects: [title] });
+    });
+  }
+  return {
+    cards,
+    statuses: Array.isArray(stored.statuses) ? stored.statuses : defaultStatuses,
+    topicOrder: Array.isArray(stored.topicOrder) ? stored.topicOrder : [],
+    collectionCategories: {
+      author: stored.collectionCategories?.author || [],
+      journal: stored.collectionCategories?.journal || [],
+      note: stored.collectionCategories?.note || [],
+    },
+  };
+}
 type GroupBy="all"|"status"|"keyword"|"project"|"author";
 type CardMeta={search:string;authors:{id:string;label:string}[];authorIds:string[];categories:string[];duplicateKey:string;keywords:string[];sortAuthor:string;sortKeyword:string;sortTitle:string;sortTopic:string;created:number};
 const cardMetaCache=new WeakMap<Card,CardMeta>();
@@ -314,7 +347,7 @@ function CardPile({ card, count, direction, onFlip }: {
   card: Card;
   count: number;
   direction: "next" | "previous";
-  onFlip: () => void;
+  onFlip: (duration?: number) => void;
 }) {
   const next = direction === "next";
   const layers = Math.min(18, count);
@@ -341,10 +374,8 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const [open, setOpen] = useState<Card | null>(null);
   const [sort, setSort] = useState("project");
   const [hasDraft, setHasDraft] = useState(false);
-  type Motion = { card: Card; position: number; direction: "next" | "previous"; previewLines: string };
-  const [navigation, setNavigation] = useState<{ position: number; direction?: Motion["direction"]; motion?: Motion }>({ position: 0 });
-  const { start: startKeyFlip, stop: stopKeyFlip } = useFlipRepeat();
-  const previewLines = useRef("2");
+  type Motion = { card: Card; position: number; direction: "next" | "previous"; duration: number };
+  const [navigation, setNavigation] = useState<{ position: number; motion?: Motion }>({ position: 0 });
   const setPosition = useCallback((position: number) => setNavigation({ position }), []);
   const [previewExpanded,setPreviewExpanded]=useState(false);
   const previewBounds = useRef<DOMRect | null>(null);
@@ -353,7 +384,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
       previewBounds.current = cardPreviewRef.current?.getBoundingClientRect() ?? null;
     }
     setPreviewExpanded(value => !value);
-    setNavigation(current => current.direction ? { position: current.position } : current);
+    setNavigation(current => current.motion ? { position: current.position } : current);
   }
   useLayoutEffect(() => {
     const before = previewBounds.current;
@@ -409,7 +440,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const closingDrafts = useRef(new Map<number, () => Card>());
   const pendingRich = useRef<Partial<Record<"findings" | "notes", () => string>>>({});
   const library = useMemo(() => ({ cards, statuses, topicOrder, collectionCategories }), [cards, statuses, topicOrder, collectionCategories]);
-  const { status: saveStatus, saveNow, stageCard, stagedCard, discardStagedCards, hasUnsaved } = useLibrarySave(library, ready, saveBrowserState);
+  const { status: saveStatus, saveNow, stageCard, stagedCard, discardStagedCards, hasUnsaved, adoptSnapshot, snapshotRevision } = useLibrarySave(library, ready, saveBrowserState);
   const takeDraft = useCallback(() => {
     if (editorCommitTimer.current) clearTimeout(editorCommitTimer.current);
     editorCommitTimer.current = null;
@@ -474,44 +505,24 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const searchCards=useCallback((value:string)=>{setQuery(value);setPosition(0)},[setPosition]);
   const selectFilter=useCallback((value:string)=>{setFilter(value);setPosition(0)},[setPosition]);
 
+  const applySnapshot = useCallback((snapshot: LibraryState, revision?: number) => {
+    if (revision !== undefined) adoptSnapshot(snapshot, revision);
+    setCards(snapshot.cards);
+    setStatuses(snapshot.statuses);
+    setTopicOrder(snapshot.topicOrder);
+    setCollectionCategories(snapshot.collectionCategories);
+  }, [adoptSnapshot]);
+
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
-        const storedValue = window.literatureBox ? await window.literatureBox.loadCards() : await loadBrowserState();
-        const raw = typeof storedValue === "string" ? JSON.parse(storedValue) : storedValue;
+        const desktop = window.literatureBox;
+        const snapshot = desktop ? await desktop.loadCards() : null;
+        const raw = desktop ? snapshot?.json : await loadBrowserState();
         if (cancelled) return;
-        const savedLibrary = (Array.isArray(raw) ? { cards: raw } : raw) as Partial<LibraryState> | null;
-        if (Array.isArray(savedLibrary?.statuses)) setStatuses(savedLibrary.statuses);
-        if (Array.isArray(savedLibrary?.topicOrder)) setTopicOrder(savedLibrary.topicOrder);
-        if (savedLibrary?.collectionCategories) {
-          setCollectionCategories({
-            author: savedLibrary.collectionCategories.author || [],
-            journal: savedLibrary.collectionCategories.journal || [],
-            note: savedLibrary.collectionCategories.note || [],
-          });
-        }
-        const stored = savedLibrary?.cards;
-        if (stored) {
-          const migrated = stored.map((card, index) => withCategories({
-            ...card,
-            createdAt: card.createdAt || (card.id > 1_000_000_000_000 ? card.id : Date.now() - (stored.length - index) * 1000),
-            kind: card.kind || "paper",
-            keywords: Array.from(new Set([...(card.keywords || []), ...(card.topics || []), ...(card.subtopics || [])])),
-            topics: [], subtopics: [],
-          }, cardCategories(card)));
-          for (const collection of ["author", "journal"] as const) {
-            if (migrated.some(card => card.kind === collection)) continue;
-            const sample = seed.find(card => card.kind === collection)!;
-            migrated.push({ ...sample, createdAt: Date.now(), keywords: Array.from(new Set([...sample.keywords, ...sample.topics])), topics: [] });
-          }
-          const existingProjects = new Set(migrated.filter(card => card.kind === "project").map(card => card.projects.join(" > ")));
-          const topicNames = new Set(migrated.filter(card => card.kind === "paper").map(card => card.projects[0]).filter(Boolean));
-          Array.from(topicNames).forEach((title, index) => {
-            if (!existingProjects.has(title)) migrated.push({ ...blank("project"), id: 4000 + index, title, projects: [title] });
-          });
-          setCards(migrated);
-        }
+        const restored = restoreLibrary(typeof raw === "string" ? JSON.parse(raw) : raw, !desktop);
+        if (restored) applySnapshot(restored, snapshot?.revision);
         setReady(true);
       } catch (error) {
         if (!cancelled) setLoadError(true);
@@ -520,7 +531,50 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     };
     void load();
     return () => { cancelled = true; };
-  }, []);
+  }, [applySnapshot]);
+
+  useEffect(() => {
+    const desktop = window.literatureBox;
+    if (!desktop || !ready) return;
+    let cancelled = false;
+    let loading = false;
+    let lastInput = 0;
+    const recordInput = () => { lastInput = performance.now(); };
+    const canRefresh = () => !cancelled && !document.hidden && !openCardRef.current &&
+      !closingSave.current && !hasUnsaved() && !document.querySelector("[aria-modal=true], .card-pile:active, .flip:active") &&
+      (lastInput === 0 || performance.now() - lastInput > 450);
+    const refresh = async () => {
+      if (loading || !canRefresh()) return;
+      loading = true;
+      const revision = snapshotRevision();
+      try {
+        const snapshot = await desktop.loadCards(revision);
+        if (!snapshot?.json || !canRefresh() || snapshotRevision() !== revision) return;
+        const restored = restoreLibrary(JSON.parse(snapshot.json), false);
+        if (!restored) return;
+        history.current = [];
+        future.current = [];
+        applySnapshot(restored, snapshot.revision);
+      } catch (error) {
+        console.error("Literature Box shared library refresh failed", error);
+      } finally {
+        loading = false;
+      }
+    };
+    const interval = setInterval(() => void refresh(), 2_000);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("pointerdown", recordInput, { passive: true });
+    window.addEventListener("keydown", recordInput);
+    window.addEventListener("wheel", recordInput, { passive: true });
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("pointerdown", recordInput);
+      window.removeEventListener("keydown", recordInput);
+      window.removeEventListener("wheel", recordInput);
+    };
+  }, [ready, applySnapshot, hasUnsaved, snapshotRevision]);
   useEffect(() => () => { if (editorCommitTimer.current) clearTimeout(editorCommitTimer.current); }, []);
   useEffect(() => {
     if (window.literatureBox) return window.literatureBox.onCloseRequested(flushAndSave);
@@ -558,28 +612,26 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const deckItems=useMemo(()=>visible.map(card=>({type:"card" as const,card})),[visible]);
   const lastPosition = Math.max(0, deckItems.length - 1);
   const boundedPosition = Math.min(navigation.position, lastPosition);
-  const flipTo = useCallback((destination: (position: number) => number) => {
+  const flipTo = useCallback((destination: (position: number) => number, duration = 280) => {
     const animate = !previewExpanded && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const lines = previewLines.current;
     setNavigation(previous => {
       const position = Math.min(previous.position, lastPosition);
       const next = Math.max(0, Math.min(lastPosition, destination(position)));
       if (next === position) return previous;
       const card = deckItems[position]?.card;
       const direction = next > position ? "next" : "previous";
-      return { position: next, direction, motion: animate && card ? {
-        card, position, direction, previewLines: lines,
+      return { position: next, motion: animate && card ? {
+        card, position, direction, duration,
       } : undefined };
     });
   }, [deckItems, lastPosition, previewExpanded]);
   const finishFlip = useCallback((motion: Motion) => {
     startTransition(() => setNavigation(current => current.motion === motion ? { position: current.position } : current));
   }, []);
-  const nextCard = useCallback(() => flipTo(position => position + 1), [flipTo]);
-  const previousCard = useCallback(() => flipTo(position => position - 1), [flipTo]);
+  const nextCard = useCallback((duration?: number) => flipTo(position => position + 1, duration), [flipTo]);
+  const previousCard = useCallback((duration?: number) => flipTo(position => position - 1, duration), [flipTo]);
   useEffect(() => {
-    let heldKey = "";
-    const stopRepeating = () => { heldKey = ""; stopKeyFlip(); };
+    let lastRepeat = 0;
     const key = (event: KeyboardEvent) => {
       if (event.defaultPrevented || !(event.target instanceof HTMLElement)) return;
       const target = event.target;
@@ -600,28 +652,38 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
       const back = event.key === "ArrowLeft" || (vertical && event.key === "ArrowDown");
       if (!forward && !back) return;
       event.preventDefault();
-      if (event.repeat) return;
-      heldKey = event.code || event.key;
-      const step = forward ? nextCard : previousCard;
-      startKeyFlip(() => {
-        if (openCardRef.current || document.querySelector("[aria-modal=true]")) stopRepeating();
-        else step();
-      });
+      const duration = event.repeat
+        ? Math.max(16, Math.min(90, lastRepeat ? event.timeStamp - lastRepeat : 90))
+        : undefined;
+      lastRepeat = event.repeat ? event.timeStamp : 0;
+      (forward ? nextCard : previousCard)(duration);
     };
-    const release = (event: KeyboardEvent) => { if ((event.code || event.key) === heldKey) stopRepeating(); };
     window.addEventListener("keydown", key);
-    window.addEventListener("keyup", release);
-    window.addEventListener("pointerdown", stopRepeating);
-    return () => {
-      stopRepeating();
-      window.removeEventListener("keydown", key);
-      window.removeEventListener("keyup", release);
-      window.removeEventListener("pointerdown", stopRepeating);
-    };
-  }, [kind, ready, flushAndSave, nextCard, previousCard, previewExpanded, startKeyFlip, stopKeyFlip]);
+    return () => window.removeEventListener("keydown", key);
+  }, [kind, ready, flushAndSave, nextCard, previousCard, previewExpanded]);
   const currentItem=deckItems[boundedPosition];
   const current=currentItem?.type==="card"?currentItem.card:null;
-  useEffect(()=>{const card=cardPreviewRef.current;if(!card||previewExpanded)return;const fit=()=>{const finding=card.querySelector<HTMLElement>(".finding.rich-preview"),footer=card.querySelector<HTMLElement>("footer"),tags=card.querySelector<HTMLElement>(".tags"),matches=card.querySelector<HTMLElement>(".search-matches");if(!finding||!footer)return;const lineHeight=parseFloat(getComputedStyle(finding).lineHeight)||24;const reserve=matches?Math.min(62,matches.scrollHeight+10):tags&&tags.children.length?Math.min(62,tags.scrollHeight+22):8;const available=Math.max(lineHeight,footer.offsetTop-finding.offsetTop-reserve);previewLines.current=String(Math.max(1,Math.min(8,Math.floor(available/lineHeight))));card.style.setProperty("--preview-lines",previewLines.current)};fit();if(typeof ResizeObserver==="undefined")return;const observer=new ResizeObserver(fit);observer.observe(card);return()=>observer.disconnect()},[current?.id,current?.title,current?.findings,current?.keywords.length,deferredQuery,previewExpanded]);
+  useLayoutEffect(() => {
+    const card = cardPreviewRef.current;
+    if (!card || previewExpanded) return;
+    const fit = () => {
+      const finding = card.querySelector<HTMLElement>(".finding.rich-preview");
+      const footer = card.querySelector<HTMLElement>("footer");
+      const tags = card.querySelector<HTMLElement>(".tags");
+      const matches = card.querySelector<HTMLElement>(".search-matches");
+      if (!finding || !footer) return;
+      const lineHeight = parseFloat(getComputedStyle(finding).lineHeight) || 24;
+      const reserve = matches ? Math.min(62, matches.scrollHeight + 10)
+        : tags?.children.length ? Math.min(62, tags.scrollHeight + 22) : 8;
+      const available = footer.offsetTop - finding.offsetTop - reserve;
+      const lines = String(Math.max(1, Math.min(8, Math.floor(available / lineHeight))));
+      card.style.setProperty("--preview-lines", lines);
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(card);
+    return () => observer.disconnect();
+  }, [current, deferredQuery, previewExpanded]);
   const kindCards=useMemo(()=>deferredCards.filter(c=>(c.kind||"paper")===kind),[deferredCards,kind]);
   const matchingKindCards=useMemo(()=>kindCards.filter(card=>{const meta=cardMetadata.get(card.id)!;return(!queryNeedle||meta.search.includes(queryNeedle))&&(kind!=="paper"||!duplicatesOnly||(duplicateTitleCounts.get(meta.duplicateKey)||0)>1)}),[kindCards,cardMetadata,queryNeedle,kind,duplicatesOnly,duplicateTitleCounts]);
   const allTags=useMemo(()=>Array.from(new Set(kindCards.flatMap(c=>getCardMeta(c).keywords))).sort(),[kindCards]);
@@ -992,8 +1054,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
       className={`note-card deck-card ${kind}-card ${previewExpanded ? "preview-expanded" : ""}`}
       key={card.id} data-stack-layer={active ? "active" : "covered"}
       data-hinge-motion={hinge} inert={!active} aria-hidden={active ? undefined : true}
-      data-expanded-flip={previewExpanded ? navigation.direction : undefined}
-      style={active ? undefined : { "--preview-lines": motion?.previewLines } as CSSProperties}
+      style={hinge && motion ? { animationDuration: `${motion.duration}ms` } : undefined}
       onAnimationEnd={hinge && motion ? event => { if (event.target === event.currentTarget) finishFlip(motion); } : undefined}
       draggable={active}
       onDragStart={active ? e => e.dataTransfer.setData("text/plain", String(card.id)) : undefined}

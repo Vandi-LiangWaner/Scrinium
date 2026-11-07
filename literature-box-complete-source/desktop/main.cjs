@@ -1,12 +1,11 @@
 const { app, BrowserWindow, dialog, ipcMain, shell, utilityProcess } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
-const { displayName, literatureBoxDataDirectory = "The Literature Box" } = require("../package.json");
+const { displayName } = require("../package.json");
 
 app.setName(displayName);
 
-const defaultLibrary = "The Literature Box";
-const databasePath = () => path.join(app.getPath("documents"), literatureBoxDataDirectory, "literature-box.sqlite");
+const databasePath = () => path.join(app.getPath("documents"), "Literature Box Library", "literature-box.sqlite");
 let database;
 let failure;
 let requestSequence = 0;
@@ -17,8 +16,8 @@ function startDatabase() {
   const paths = {
     file,
     backupFile: path.join(path.dirname(file), "Backups", "literature-box-latest.sqlite"),
-    sourceFile: literatureBoxDataDirectory === defaultLibrary ? null :
-      path.join(app.getPath("documents"), defaultLibrary, "literature-box.sqlite"),
+    legacyFiles: ["The Literature Box", "Literature Box Stacks"].map(name =>
+      path.join(app.getPath("documents"), name, "literature-box.sqlite")),
   };
   database = utilityProcess.fork(path.join(__dirname, "database.cjs"), [JSON.stringify(paths)], {
     serviceName: displayName + " database",
@@ -91,9 +90,8 @@ app.whenReady().then(()=>{startDatabase();createWindow();app.on("activate",()=>{
 app.on("window-all-closed",()=>{if(process.platform!=="darwin")app.quit()});
 app.on("will-quit", () => { if (database) database.kill(); });
 
-ipcMain.handle("cards:load", () => requestDatabase("load"));
+ipcMain.handle("cards:load", (_, revision) => requestDatabase("load", revision));
 ipcMain.handle("cards:save", (_, payload) => requestDatabase("save", payload));
-ipcMain.handle("cards:patch", (_, payload) => requestDatabase("patch", payload));
 ipcMain.handle("cards:export",async(_,{kind,body})=>{const result=await dialog.showSaveDialog({defaultPath:`literature-box.${kind}`,filters:[{name:kind.toUpperCase(),extensions:[kind]}]});if(!result.canceled&&result.filePath)await fs.promises.writeFile(result.filePath,body);return !result.canceled});
 ipcMain.handle("cards:import",async()=>{const result=await dialog.showOpenDialog({properties:["openFile"],filters:[{name:"JSON backup",extensions:["json"]}]});if(result.canceled)return null;return JSON.parse(await fs.promises.readFile(result.filePaths[0],"utf8"))});
 ipcMain.handle("app:data-location",()=>databasePath());

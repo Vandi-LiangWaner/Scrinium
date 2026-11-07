@@ -1,11 +1,10 @@
-import type { CardPatch } from "../app/library-save";
+import type { DesktopSaveResult, DesktopSnapshot } from "../app/library-save";
 
 declare global {
   interface Window {
     literatureBox?: {
-      loadCards(): Promise<unknown>;
-      saveCards(cards: unknown): Promise<boolean>;
-      patchCard(patch: CardPatch): Promise<boolean>;
+      loadCards(revision?: number): Promise<DesktopSnapshot | null>;
+      saveCards(changes: string): Promise<DesktopSaveResult>;
       onCloseRequested(save: () => Promise<boolean>): () => void;
       exportFile(kind: string, body: string): Promise<boolean>;
       importFile(): Promise<unknown>;

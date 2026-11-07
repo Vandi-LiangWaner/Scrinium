@@ -155,14 +155,13 @@
   transform: rotateX(var(--card-lean));
   transform-origin: center bottom;
   animation: none;
+  transition: box-shadow .18s ease;
   will-change: auto;
 }
 .stack-hinge [data-stack-layer=covered] { pointer-events: none; z-index: 0; }
 .stack-hinge .deck-card[data-hinge-motion] { z-index: 2; will-change: transform; }
 .stack-hinge .deck-card[data-hinge-motion=fall] { animation: hinge-fall .28s linear both; }
 .stack-hinge .deck-card[data-hinge-motion=rise] { animation: hinge-rise .28s linear both; }
-.deck-card[data-expanded-flip=next] { animation: expanded-next .28s linear; }
-.deck-card[data-expanded-flip=previous] { animation: expanded-previous .28s linear; }
 .deck-card[data-preview-transition] { animation: none; transform-origin: center bottom; }
 .deck-card.preview-expanded[data-preview-transition] { transform: none; }
 .card-pile {
@@ -215,10 +214,8 @@
 .flip { touch-action: manipulation; }
 @keyframes hinge-fall { from { transform: rotateX(var(--card-lean)); } to { transform: rotateX(-89deg); } }
 @keyframes hinge-rise { from { transform: rotateX(-89deg); } to { transform: rotateX(var(--card-lean)); } }
-@keyframes expanded-next { from { transform: translateX(34px); } to { transform: translateX(0); } }
-@keyframes expanded-previous { from { transform: translateX(-34px); } to { transform: translateX(0); } }
 @media (prefers-reduced-motion: reduce) {
-  .stack-hinge .deck-card[data-hinge-motion], .deck-card[data-expanded-flip] { animation: none; }
+  .stack-hinge .deck-card[data-hinge-motion] { animation: none; }
   .stack-hinge [data-stack-layer=covered] { display: none; }
 }
 

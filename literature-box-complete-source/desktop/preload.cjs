@@ -1,9 +1,8 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("literatureBox", {
-  loadCards: () => ipcRenderer.invoke("cards:load"),
+  loadCards: revision => ipcRenderer.invoke("cards:load", revision),
   saveCards: (cards) => ipcRenderer.invoke("cards:save", cards),
-  patchCard: (patch) => ipcRenderer.invoke("cards:patch", patch),
   onCloseRequested: (save) => {
     const listener = async () => {
       let saved = false;

@@ -1,41 +1,80 @@
 const path = require("node:path");
 const fs = require("node:fs");
+const { setTimeout: delay } = require("node:timers/promises");
 const Database = require("better-sqlite3");
+const { mergeLegacyLibraries, applyLibraryChanges } = require("./library-sync.cjs");
 
 const { parentPort } = process;
-const { file, backupFile, sourceFile } = JSON.parse(process.argv[2]);
-let db, loadState, saveState;
+const { file, backupFile, legacyFiles } = JSON.parse(process.argv[2]);
+let db, loadState, revision, writeChanges, cardIndex;
 let backupTimer = null;
 let backupInFlight = false;
 let backupQueued = false;
 
-async function openDatabase() {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  if (sourceFile && !fs.existsSync(file) && fs.existsSync(sourceFile)) {
-    const source = new Database(sourceFile, { readonly: true, fileMustExist: true });
-    const temporary = file + ".import-" + process.pid;
-    try {
-      await source.backup(temporary);
-      // If another launch already initialized the library, retain that copy.
-      try { fs.linkSync(temporary, file); }
-      catch (error) {
-        if (error.code !== "EEXIST") {
-          if (!["ENOTSUP", "EPERM", "ENOSYS"].includes(error.code)) throw error;
-          try { fs.copyFileSync(temporary, file, fs.constants.COPYFILE_EXCL); }
-          catch (copyError) { if (copyError.code !== "EEXIST") throw copyError; }
-        }
-      }
-    } finally {
-      source.close();
-      fs.rmSync(temporary, { force: true });
-    }
+function readLegacy(file) {
+  if (!fs.existsSync(file)) return null;
+  const source = new Database(file, { readonly: true, fileMustExist: true });
+  try {
+    const initialized = source.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='app_state'").get();
+    if (!initialized) return null;
+    const record = source.prepare("SELECT cards_json FROM app_state WHERE id=1").get();
+    return record ? JSON.parse(record.cards_json) : null;
+  } finally {
+    source.close();
   }
+}
+
+function openDatabase() {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
   db = new Database(file);
-  db.pragma("journal_mode = WAL");
+  if (db.pragma("journal_mode", { simple: true }) !== "wal") db.pragma("journal_mode = WAL");
   db.pragma("synchronous = NORMAL");
-  db.exec("CREATE TABLE IF NOT EXISTS app_state (id INTEGER PRIMARY KEY CHECK(id=1), cards_json TEXT NOT NULL, updated_at TEXT NOT NULL)");
-  loadState = db.prepare("SELECT cards_json FROM app_state WHERE id=1");
-  saveState = db.prepare("INSERT INTO app_state(id,cards_json,updated_at) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET cards_json=excluded.cards_json,updated_at=excluded.updated_at");
+  db.exec("CREATE TABLE IF NOT EXISTS app_state (id INTEGER PRIMARY KEY CHECK(id=1), cards_json TEXT NOT NULL, revision INTEGER NOT NULL)");
+  revision = db.prepare("SELECT revision FROM app_state WHERE id=1");
+  loadState = db.prepare("SELECT revision, cards_json AS json FROM app_state WHERE id=1");
+  cardIndex = db.prepare(`
+    SELECT card.key AS position FROM app_state, json_each(cards_json, '$.cards') AS card
+    WHERE app_state.id=1 AND json_extract(card.value, '$.id')=? LIMIT 1
+  `);
+  const saveState = db.prepare("INSERT INTO app_state(id,cards_json,revision) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET cards_json=excluded.cards_json,revision=excluded.revision");
+
+  db.transaction(() => {
+    if (revision.get()) return;
+    const [classic, stacks] = legacyFiles.map(readLegacy);
+    if (classic || stacks) saveState.run(JSON.stringify(mergeLegacyLibraries(classic, stacks)), 1);
+  }).immediate();
+
+  writeChanges = db.transaction(({ baseRevision, changes, recover = [] }) => {
+    const current = revision.get()?.revision ?? 0;
+    const concurrent = current !== baseRevision;
+    if (!concurrent && patchCard(changes, current + 1)) return { revision: current + 1, reconcile: false };
+    const record = loadState.get();
+    const source = record ? JSON.parse(record.json) : null;
+    const present = new Set(source?.cards.map(card => card.id));
+    const recovery = new Map(recover.map(card => [card.id, card]));
+    const missing = changes.updated.map(card => card.id).filter(id => !present.has(id) && !recovery.has(id));
+    if (missing.length) return { missing };
+    const { state, conflicts } = applyLibraryChanges(source, changes, concurrent, recovery);
+    saveState.run(JSON.stringify(state), current + 1);
+    return { revision: current + 1, reconcile: concurrent || conflicts };
+  }).immediate;
+}
+
+function patchCard(changes, nextRevision) {
+  if (changes.added.length || changes.removed.length || changes.updated.length !== 1 ||
+      changes.statuses || changes.topicOrder || Object.keys(changes.collectionCategories).length) return false;
+  const { id, fields } = changes.updated[0];
+  if (!fields.length || fields.length > 24 || fields.some(({ key, after }) =>
+    key === "id" || !/^[a-zA-Z]+$/.test(key) || after === undefined)) return false;
+  const entry = cardIndex.get(id);
+  if (!entry) return false;
+  const values = fields.flatMap(({ key, after }) => [
+    `$.cards[${entry.position}].${key}`, JSON.stringify(after),
+  ]);
+  const args = fields.map(() => "?, json(?)").join(", ");
+  db.prepare(`UPDATE app_state SET cards_json=json_set(cards_json, ${args}), revision=? WHERE id=1`)
+    .run(...values, nextRevision);
+  return true;
 }
 
 function queueBackup() {
@@ -45,47 +84,47 @@ function queueBackup() {
     backupTimer = null;
     backupQueued = false;
     backupInFlight = true;
+    const temporary = backupFile + "." + process.pid;
     try {
       fs.mkdirSync(path.dirname(backupFile), { recursive: true });
-      await db.backup(backupFile);
+      await db.backup(temporary);
+      fs.renameSync(temporary, backupFile);
     } catch (error) {
       console.error("Literature Box backup failed", error);
     } finally {
+      fs.rmSync(temporary, { force: true });
       backupInFlight = false;
       if (backupQueued) queueBackup();
     }
   }, 60_000);
 }
 
-function patchCard({ index, id, fields }) {
-  const entries = Object.entries(fields);
-  if (!Number.isSafeInteger(index) || index < 0 || !Number.isFinite(id) ||
-      !entries.length || entries.length > 24 ||
-      entries.some(([key]) => key === "id" || !/^[a-zA-Z]+$/.test(key))) return false;
-  const cardPath = `$.cards[${index}]`;
-  const values = entries.flatMap(([key, value]) => [`${cardPath}.${key}`, JSON.stringify(value)]);
-  const args = entries.map(() => "?, json(?)").join(", ");
-  const result = db.prepare(`
-    UPDATE app_state SET cards_json=json_set(cards_json, ${args}), updated_at=?
-    WHERE id=1 AND json_extract(cards_json, ?) = ?
-  `).run(...values, new Date().toISOString(), `${cardPath}.id`, id);
-  if (result.changes) queueBackup();
-  return result.changes === 1;
+async function startDatabase() {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      openDatabase();
+      return null;
+    } catch (error) {
+      db?.close();
+      db = undefined;
+      if (attempt === 5 || !["SQLITE_BUSY", "SQLITE_LOCKED"].includes(error.code)) return error;
+      await delay(40 * (attempt + 1));
+    }
+  }
 }
+const ready = startDatabase();
 
-const ready = openDatabase().then(() => null, error => error);
 parentPort.on("message", async ({ data: { requestId, method, payload } }) => {
   try {
-    const error = await ready;
-    if (error) throw error;
+    const startupError = await ready;
+    if (startupError) throw startupError;
     let value;
-    if (method === "load") value = loadState.get()?.cards_json ?? null;
-    else if (method === "patch") value = patchCard(payload);
-    else if (method === "save") {
-      const json = typeof payload === "string" ? payload : JSON.stringify(payload);
-      saveState.run(json, new Date().toISOString());
-      queueBackup();
-      value = true;
+    if (method === "load") {
+      const current = revision.get()?.revision ?? 0;
+      value = current === payload ? null : loadState.get() ?? { revision: 0, json: null };
+    } else if (method === "save") {
+      value = writeChanges(JSON.parse(payload));
+      if (value.revision !== undefined) queueBackup();
     } else throw new Error("Unknown database operation");
     parentPort.postMessage({ requestId, value });
   } catch (error) {
