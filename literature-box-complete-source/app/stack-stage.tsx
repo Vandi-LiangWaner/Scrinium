@@ -56,12 +56,19 @@ export function StackStage({ expanded, position, total, onNext, onPrevious, from
     const dx = before.left - origin.left - (after.left - origin.left) * sx;
     const dy = before.top - origin.top - (after.top - origin.top) * sy;
     // Only the transition is scaled. Its finished state leaves the reading card in native layout.
+    frame.style.willChange = "transform";
     const animation = frame.animate([
       { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` },
       { transform: "none" },
-    ], { duration: 320, easing: "cubic-bezier(.2,.7,.25,1)" });
-    animation.finished.catch(() => {});
-    return () => animation.cancel();
+    ], { duration: 180, easing: "cubic-bezier(.2,.65,.3,1)" });
+    let released = false;
+    const cleanup = () => {
+      if (released) return;
+      released = true;
+      frame.style.removeProperty("will-change");
+    };
+    animation.finished.then(cleanup, cleanup);
+    return () => { animation.cancel(); cleanup(); };
   }, [expanded, fromBounds]);
   return <div ref={viewport} className={`stack-viewport${expanded ? " is-expanded" : ""}`}
     onPointerDown={event => {
