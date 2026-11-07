@@ -105,14 +105,13 @@
   --sheet-face: 11px;
   --pile-tilt: 32deg;
   --card-lean: 11deg;
+  --card-height: 430px;
   --stack-perspective: 4600px;
   --edge-height: calc(var(--sheet-face) + 17 * var(--sheet-step));
   min-height: 0;
   grid-template-columns: min(680px, 75vw, 100%);
   grid-template-rows: var(--edge-height) auto var(--edge-height);
   justify-content: center;
-  perspective: var(--stack-perspective);
-  perspective-origin: 50% 46%;
 }
 .stack-compact .deck-shadow { display: none; }
 @media (min-width: 1051px) {
@@ -121,12 +120,13 @@
   }
 }
 @media (max-width: 700px) {
-  .stack-compact { grid-template-columns: min(82vw, 100%); }
+  .stack-compact { --card-height: 400px; grid-template-columns: min(82vw, 100%); }
 }
 .stack-hinge {
   grid-area: 2 / 1;
   display: grid;
   width: 100%;
+  height: var(--card-height);
   min-width: 0;
   perspective: var(--stack-perspective);
   perspective-origin: center bottom;
@@ -164,19 +164,34 @@
   user-select: none;
 }
 .card-pile:focus-visible { outline: 2px solid #8d694b; outline-offset: 3px; }
-/* The rear pile reaches the slightly lowered top of the leaning card. */
-.card-pile-next { grid-area: 1 / 1; align-self: end; z-index: 2; margin-bottom: -18px; transform: rotateX(var(--pile-tilt)); transform-origin: bottom; }
-.card-pile-previous { grid-area: 3 / 1; align-self: start; z-index: 4; margin-top: -5px; transform: rotateX(var(--pile-tilt)); transform-origin: top; }
+/* Project both piles from the card's hinge. The rear pile starts at the leaned top edge. */
+.card-pile-next {
+  grid-area: 1 / 1;
+  align-self: end;
+  z-index: 2;
+  transform-origin: center bottom;
+  transform: translateY(var(--card-height)) perspective(var(--stack-perspective))
+    translateY(calc(-1 * var(--card-height) * cos(var(--card-lean))))
+    translateZ(calc(-1 * var(--card-height) * sin(var(--card-lean))))
+    rotateX(var(--pile-tilt));
+}
+.card-pile-previous {
+  grid-area: 3 / 1;
+  align-self: start;
+  z-index: 4;
+  transform-origin: center top;
+  transform: perspective(var(--stack-perspective)) rotateX(var(--pile-tilt));
+}
 .pile-sheets, .pile-sheet { position: absolute; pointer-events: none; }
 .pile-sheets { inset: 0; }
 .pile-sheet {
   inset-inline: 0;
   height: var(--sheet-face);
-  border: 1px solid #a38a65;
-  background: linear-gradient(#efdfc0 0 65%, #bca480 66%);
-  box-shadow: 0 2px 3px #4a372545;
+  border: 1px solid #ad9674;
+  background: linear-gradient(#ebdabc 0 72%, #c4af8f 73%);
+  box-shadow: 0 1px 2px #4a372538;
 }
-.pile-sheet:nth-child(2n) { background: linear-gradient(#e4d2ad 0 65%, #b49a74 66%); }
+.pile-sheet:nth-child(2n) { background: linear-gradient(#e5d3b3 0 72%, #bfa98a 73%); }
 .card-pile:hover .pile-sheet, .card-pile:focus-visible .pile-sheet { border-color: #806748; }
 .card-pile-next .pile-sheet { bottom: calc(var(--layer) * var(--sheet-step)); }
 .card-pile-previous .pile-sheet { top: calc(var(--layer) * var(--sheet-step)); }
