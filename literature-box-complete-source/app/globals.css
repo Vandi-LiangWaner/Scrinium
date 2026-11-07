@@ -52,6 +52,12 @@
 .note-writing .rich-editor { min-height: 240px; padding: 13px; font-size: 16px; }
 .inline-link-form, .note-links { margin: 8px 0 14px; padding: 12px; border: 1px solid #c7b69a; background: #fbf3e2; }
 .inline-link-form label { margin: 0 0 8px; }
+.inline-link-form label.web-link-label { margin-top: 12px; }
+.context-format { position: fixed; z-index: 80; width: min(390px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto; background: #f9efda; border: 1px solid #ae9878; padding: 9px; box-shadow: 0 6px 22px #2d201750; }
+.context-format .rich-tools { margin: 0; }
+.context-format .inline-link-form { margin: 8px 0 0; }
+.context-format label { display: block; color: #655744; font: 11px Arial, sans-serif; }
+.context-format input { display: block; width: 100%; padding: 6px; border: 1px solid #b7aa91; background: #fffbf1; color: var(--ink); font: 14px Georgia, serif; }
 .inline-link-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .inline-link-actions button, .note-links button, .editor-save-controls button, .save-state button {
   border: 1px solid #b7aa91;
@@ -97,6 +103,11 @@
 .journal-summary dt, .journal-summary dd { display: inline; margin: 0; }
 .journal-summary dd { margin-inline-start: .3em; color: #544636; font-weight: 600; }
 .editor-save-controls { display: flex; gap: 7px; align-items: center; }
+.linked-card-dialog { max-width: min(680px, calc(100% - 32px)); max-height: calc(100% - 32px); margin: auto; padding: 0; border: 0; background: transparent; color: var(--ink); }
+.linked-card-dialog::backdrop { background: #2e241c99; }
+.linked-card-dialog .linked-card-face { width: min(680px, 85vw); max-width: 100%; height: auto; min-height: 0; cursor: default; animation: none; transform: none; }
+.linked-card-face .modal-foot { justify-content: flex-end; }
+.linked-flip { align-self: flex-start; border: 1px solid #b9aa91; padding: 5px 9px; background: #f8f0df; color: #75513d; font: 11px Arial, sans-serif; cursor: pointer; }
 .save-state.error { display: inline; color: #923f2e; }
 .save-state button { margin-left: 6px; }
 
