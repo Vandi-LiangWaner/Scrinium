@@ -9,7 +9,7 @@
 .project-divider>*{position:relative;z-index:2;color:#fff5df!important;text-shadow:0 1px 1px #24150e}
 .project-divider .rule{background:#e4c9a777}.project-divider footer{color:#f1d7bd!important}
 .topic-actions{display:flex;gap:6px;margin-top:-5px}.topic-actions button{border:1px solid #b6a58b;background:#f1e5cf;padding:6px 8px;color:#655744;font:10px Arial,sans-serif;cursor:pointer}.topic-actions button:disabled{opacity:.4;cursor:default}
-.organizer-tabs{margin-top:12px}.organizer-tabs button{background:#b7a17d}.organizer-tabs button.active{height:50px}
+.organizer-tabs{margin-top:12px}.organizer-tabs button.active{height:50px}
 .dividers.value-tabs {
   margin-top: 6px;
   flex-wrap: wrap;
@@ -18,7 +18,6 @@
   overflow: visible;
 }
 .dividers.value-tabs button {
-  --tab-color: #d4c3a1;
   position: relative;
   flex: 0 0 auto;
   min-width: 0;
@@ -33,12 +32,8 @@
   clip-path: polygon(0 100%, 0 9px, 1px 6px, 4px 2px, 8px 0,
     calc(100% - 19px) 0, calc(100% - 15px) 1px, calc(100% - 11px) 5px, 100% 100%);
 }
-.dividers.value-tabs button:nth-child(5n + 2) { --tab-color: #c9b795; }
-.dividers.value-tabs button:nth-child(5n + 3) { --tab-color: #beac88; }
-.dividers.value-tabs button:nth-child(5n + 4) { --tab-color: #b8a37c; }
-.dividers.value-tabs button:nth-child(5n + 5) { --tab-color: #ae9870; }
-.dividers.value-tabs button:not(.active, .edit-statuses, .project-crumb, .previous-topic-level) {
-  background: linear-gradient(var(--tab-color), color-mix(in srgb, var(--tab-color), #624e33 7%));
+.dividers:is(.value-tabs, .organizer-tabs) button:not(.active, .edit-statuses, .project-crumb, .previous-topic-level) {
+  background: #c9b998;
 }
 .dividers.value-tabs button.active {
   min-height: 46px;
@@ -52,7 +47,7 @@
   position: absolute;
   z-index: -1;
   inset: 0 1.5px 1px 0;
-  background: linear-gradient(#f7efdc, #f0e5ce);
+  background: #f1e7d2;
   clip-path: inherit;
 }
 .dividers.value-tabs button:focus-visible { z-index: 2; outline: 2px solid #78563d; outline-offset: -5px; }
