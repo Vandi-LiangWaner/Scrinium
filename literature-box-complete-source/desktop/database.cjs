@@ -62,7 +62,8 @@ function openDatabase() {
 
 function patchCard(changes, nextRevision) {
   if (changes.added.length || changes.removed.length || changes.updated.length !== 1 ||
-      changes.statuses || changes.topicOrder || Object.keys(changes.collectionCategories).length) return false;
+      changes.statuses || changes.topicOrder || Object.keys(changes.collectionCategories).length ||
+      Object.keys(changes.categoryOrder || {}).length) return false;
   const { id, fields } = changes.updated[0];
   if (!fields.length || fields.length > 24 || fields.some(({ key, after }) =>
     key === "id" || !/^[a-zA-Z]+$/.test(key) || after === undefined)) return false;

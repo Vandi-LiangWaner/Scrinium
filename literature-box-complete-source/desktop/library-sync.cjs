@@ -15,6 +15,7 @@ function normalizeLibrary(value) {
     cards: source?.cards || [],
     statuses: source?.statuses || ["To read", "Reading", "Read", "Annotated"],
     topicOrder: source?.topicOrder || [],
+    categoryOrder: Object.fromEntries(["paper", ...collections].map(kind => [kind, source?.categoryOrder?.[kind] || []])),
     collectionCategories: Object.fromEntries(collections.map(kind => [kind, source?.collectionCategories?.[kind] || []])),
   };
 }
@@ -59,6 +60,8 @@ function mergeLegacyLibraries(classic, stacks) {
     cards: [...first.cards, ...copies.map(card => remapLinks(card, ids))],
     statuses: unique([...first.statuses, ...second.statuses]),
     topicOrder: unique([...first.topicOrder, ...second.topicOrder]),
+    categoryOrder: Object.fromEntries(["paper", ...collections].map(kind =>
+      [kind, unique([...first.categoryOrder[kind], ...second.categoryOrder[kind]])])),
     collectionCategories: Object.fromEntries(collections.map(kind =>
       [kind, unique([...first.collectionCategories[kind], ...second.collectionCategories[kind]])])),
   };
@@ -131,6 +134,10 @@ function applyLibraryChanges(source, changes, concurrent, recovery) {
   for (const kind of collections) {
     const change = changes.collectionCategories[kind];
     if (change) state.collectionCategories[kind] = concurrent ? mergeList(state.collectionCategories[kind], change) : change.after;
+  }
+  for (const kind of ["paper", ...collections]) {
+    const change = changes.categoryOrder?.[kind];
+    if (change) state.categoryOrder[kind] = concurrent ? mergeList(state.categoryOrder[kind], change) : change.after;
   }
   return { state, conflicts };
 }

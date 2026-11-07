@@ -114,22 +114,30 @@
 /* Approved full-sheet geometry: a shared camera and fixed bottom pivots. */
 .deck-wrap { --stack-zoom: .9; min-height: 0; display: block; }
 .deck-wrap > .flip[hidden], .deck-wrap > .deck-shadow { display: none; }
+.deck-wrap > .flip { position: absolute; top: 50%; transform: translateY(-50%); z-index: 5; }
 .stack-viewport { position: relative; width: 100%; height: 810px; overflow: clip; }
+.stack-transition { position: absolute; inset: 0; transform-origin: 0 0; }
 .stack-projection { position: absolute; width: 1000px; height: 900px; top: 0; left: 50%; transform: translateX(-50%) scale(var(--stack-zoom)); transform-origin: center top; perspective: 4000px; perspective-origin: 500px 590px; }
-.stack-world { position: absolute; left: 160px; top: 160px; width: 680px; height: 430px; transform: rotateX(-25deg) rotateY(6deg); transform-origin: center bottom; transform-style: preserve-3d; transition: top .32s cubic-bezier(.2,.7,.25,1), transform .32s cubic-bezier(.2,.7,.25,1); }
+.stack-world { position: absolute; left: 160px; top: 160px; width: 680px; height: 430px; transform: rotateX(-25deg) rotateY(6deg); transform-origin: center bottom; transform-style: preserve-3d; transition: none; }
 .stack-card-plane, .stack-paper { position: absolute; left: 0; bottom: 0; width: 680px; height: 430px; transform-origin: center bottom; transform-style: preserve-3d; }
-.stack-card-plane { transform: rotateX(28deg); transition: height .32s cubic-bezier(.2,.7,.25,1), transform .32s cubic-bezier(.2,.7,.25,1); }
+.stack-card-plane { transform: rotateX(28deg); transition: none; }
 /* The empty camera/world planes must not intercept controls on sheets behind them. */
 .stack-projection, .stack-world { pointer-events: none; }
 .stack-card-plane { pointer-events: auto; }
 .stack-card-plane[data-plane-layer=covered] { pointer-events: none; }
-.stack-world .deck-card { position: absolute; inset: 0; width: 680px; height: 100%; min-height: 0; margin: 0; transform: translateZ(.2px); transform-origin: center bottom; backface-visibility: hidden; z-index: auto; animation: none; transition: height .32s cubic-bezier(.2,.7,.25,1), box-shadow .18s; overflow: clip; }
-.stack-world .deck-card:hover { transform: translateZ(.2px); }
+.stack-world .deck-card { position: absolute; inset: 0; width: 680px; height: 100%; min-height: 0; margin: 0; transform: translateZ(1.5px); transform-origin: center bottom; backface-visibility: hidden; z-index: auto; animation: none; transition: box-shadow .18s; overflow: clip; }
+.stack-world .deck-card:hover { transform: translateZ(1.5px); }
 .stack-world .deck-card h2 { font-size: 28px; }
-.stack-paper-face { position: absolute; inset: 0; box-sizing: border-box; border: 1px solid #bca988; background: #f5ecd8; backface-visibility: hidden; transform: translateZ(.2px); box-shadow: 0 1px 2px #40352024; overflow: hidden; pointer-events: none; transition: opacity .16s; }
+.stack-paper-face { position: absolute; inset: 0; box-sizing: border-box; border: 1.5px solid #bca988; background: #f5ecd8; backface-visibility: hidden; transform: translateZ(1.5px); box-shadow: 0 1px 2px #40352024; overflow: hidden; pointer-events: none; transition: opacity .16s; }
 .stack-paper-face::before { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(transparent 0 31px, #c6b79766 31px 32px); opacity: .44; }
 .stack-paper:nth-child(3n + 1) > .stack-paper-face:not(.stack-paper-back) { background: #f0e5cf; }
-.stack-paper-back { background: #eadfc7; transform: rotateY(180deg) translateZ(.2px); }
+.stack-paper-back { background: #eadfc7; transform: rotateY(180deg) translateZ(1.5px); }
+.stack-paper::before, .stack-paper::after, .stack-card-plane::before, .stack-card-plane::after, .stack-paper-rim { content: ""; position: absolute; background: #c4b08b; pointer-events: none; }
+.stack-paper::before, .stack-card-plane::before { top: 0; left: 0; width: 100%; height: 3px; transform-origin: center top; transform: translateZ(1.5px) rotateX(-90deg); }
+.stack-paper::after, .stack-card-plane::after { bottom: 0; left: 0; width: 100%; height: 3px; transform-origin: center bottom; transform: translateZ(1.5px) rotateX(90deg); }
+.stack-paper-rim { top: 0; height: 100%; width: 3px; }
+.stack-paper-left { left: 0; transform-origin: left center; transform: translateZ(1.5px) rotateY(90deg); }
+.stack-paper-right { right: 0; transform-origin: right center; transform: translateZ(1.5px) rotateY(-90deg); }
 .card-pile { position: absolute; inset: 0; padding: 0; border: 0; margin: 0; background: transparent; color: inherit; appearance: none; transform-style: preserve-3d; pointer-events: none; touch-action: manipulation; cursor: pointer; }
 .card-pile .stack-paper { pointer-events: auto; }
 .card-pile:disabled .stack-paper { pointer-events: none; }
@@ -138,9 +146,13 @@
 .stack-card-plane[data-hinge-motion] { will-change: transform; transition: none; }
 .stack-card-plane[data-hinge-motion=fall] { animation: hinge-fall .28s linear both; }
 .stack-card-plane[data-hinge-motion=rise] { animation: hinge-rise .28s linear both; }
-.stack-viewport.is-expanded .stack-world { top: 280px; transform: rotateX(0deg); }
-.stack-viewport.is-expanded .stack-card-plane { height: 650px; transform: rotateX(0deg); }
-.stack-viewport.is-expanded .deck-card { overflow-y: auto; }
+.stack-viewport.is-expanded .stack-projection { inset: 0; width: 100%; height: 100%; transform: none; perspective: none; }
+.stack-viewport.is-expanded .stack-world { position: relative; left: auto; top: auto; width: min(680px, calc(100% - 104px)); height: 650px; margin: 28px auto; transform: none; transform-style: flat; transition: none; }
+.stack-viewport.is-expanded .stack-card-plane { width: 100%; height: 100%; transform: none; transform-style: flat; transition: none; }
+.stack-viewport.is-expanded .deck-card, .stack-viewport.is-expanded .deck-card:hover { width: 100%; overflow-y: auto; transform: none; backface-visibility: visible; will-change: auto; }
+.stack-viewport.is-expanded .deck-card h2 { font-size: clamp(20px, 2.2vw, 28px); }
+.stack-viewport.is-expanded .stack-card-plane > .stack-paper-face, .stack-viewport.is-expanded .stack-paper-rim, .stack-viewport.is-expanded .stack-card-plane::before, .stack-viewport.is-expanded .stack-card-plane::after { display: none; }
+.stack-viewport.is-expanded .card-pile { visibility: hidden; }
 .stack-viewport.is-expanded .card-pile .stack-paper-face { opacity: 0; }
 .stack-viewport.is-expanded .card-pile .stack-paper { pointer-events: none; }
 .deck-wrap:has(.preview-expanded) { min-height: 0; }
