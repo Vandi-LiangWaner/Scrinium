@@ -1,4 +1,4 @@
-name: Stage verified Scrinium installers for preview
+name: Publish verified Scrinium installers
 on:
   push:
     branches: [codex/index-installer-transfer]
@@ -15,13 +15,13 @@ jobs:
         include:
           - edition: Classic
             version: 3.2.6
-            run: 42370605063
-            commit: 6f42e6c70fd0b6aeb73fb22fd81a72dd6eb7d370
+            run: 42389206610
+            commit: 1e49708d0a2febe3e80fde42b27751e92f0c663b
             release: 437537702
           - edition: Stacks
             version: 3.3.8
-            run: 42370622377
-            commit: 917da0786a0168dfe8f082ed33dd5a7389e2f69b
+            run: 42389221372
+            commit: df3d22897c512dd75a6d8ca73a3757d46bba0eec
             release: 437537709
     env:
       GH_REPO: ${{ github.repository }}
@@ -91,7 +91,7 @@ jobs:
                   checksum.write(f"{digest}  {file.name}\n")
           PY
           cat installers/SHA256SUMS.txt
-      - name: Upload verified files and keep draft
+      - name: Upload verified files and publish
         run: |
           TAG="v$VERSION"
           for file in installers/*; do
@@ -102,6 +102,9 @@ jobs:
             asset=$(gh api "repos/$GH_REPO/releases/$RELEASE_ID/assets" | jq -c --arg name "$name" '.[] | select(.name == $name)')
             jq -e --arg digest "$digest" --argjson size "$size" '.state == "uploaded" and .size == $size and (.digest == null or .digest == $digest)' <<< "$asset"
           done
-          gh api "repos/$GH_REPO/releases/$RELEASE_ID" | jq -e ' .draft == true '
+          latest=false
+          if [ "$EDITION" = "Stacks" ]; then latest=true; fi
+          gh release edit "$TAG" --draft=false --latest="$latest"
+          test "$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq .object.sha)" = "$COMMIT"
           gh release view "$TAG" --json url,isDraft,assets
 
