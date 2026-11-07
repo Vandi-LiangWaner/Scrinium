@@ -14,10 +14,16 @@ jobs:
       matrix:
         include:
           - edition: Classic
-            version: 3.2.2
-            run: 42243577272
-            commit: 02ee6f4e7688c3a389f6e826cc4d0948c95ed337
-            release: 436667155
+            version: 3.2.5
+            run: 42363988150
+            commit: 33ae826e270b2c95290af262e5f3aaf67976312f
+            release: 437505255
+            latest: "false"
+          - edition: Stacks
+            version: 3.3.7
+            run: 42364572259
+            commit: 6088307953392a2928ac7023f5c15a0a45e734d5
+            release: 437505265
             latest: "true"
     env:
       GH_REPO: ${{ github.repository }}
@@ -29,32 +35,39 @@ jobs:
       RELEASE_ID: ${{ matrix.release }}
       MAKE_LATEST: ${{ matrix.latest }}
     steps:
-      - name: Verify the exact Windows build
+      - name: Verify exact successful build and draft
         run: |
-          gh run view "$BUILD_RUN" --json headSha |
-            jq -e --arg commit "$COMMIT" '.headSha == $commit'
-          gh api "repos/$GH_REPO/actions/jobs/127979890037" |
-            jq -e '.status == "completed" and .conclusion == "success"'
+          gh run watch "$BUILD_RUN" --exit-status --interval 15
+          gh run view "$BUILD_RUN" --json headSha,status,conclusion |
+            jq -e --arg commit "$COMMIT" '.headSha == $commit and .status == "completed" and .conclusion == "success"'
+          gh api "repos/$GH_REPO/releases/$RELEASE_ID" |
+            jq -e --arg commit "$COMMIT" --arg tag "v$VERSION" '.target_commitish == $commit and .tag_name == $tag and .draft == true'
       - uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
           run-id: ${{ matrix.run }}
           name: literature-box-windows-latest
           path: windows
-      - name: Stage and verify installer formats
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ matrix.run }}
+          name: literature-box-macos-latest
+          path: macos
+      - name: Stage and verify Windows and macOS installers
         run: |
           python - <<'PY'
           from pathlib import Path
           from shutil import copyfile
+          import hashlib
           import os
-          import re
 
           version = os.environ["VERSION"]
           edition = os.environ["EDITION"]
           out = Path("installers")
           out.mkdir()
-          title = f"Literature Box {edition}"
-          prefix = f"Literature-Box-{edition}-{version}"
+          title = f"Scrinium {edition}"
+          prefix = f"Scrinium-{edition}-{version}"
           exe = [p for p in Path("windows").rglob(f"*{version}.exe") if p.name.startswith(title)]
           setup = [p for p in exe if "setup" in p.name.lower()]
           portable = [p for p in exe if "setup" not in p.name.lower()]
@@ -65,22 +78,31 @@ jobs:
               with source.open("rb") as file:
                   assert file.read(2) == b"MZ"
               copyfile(source, out / f"{prefix}-Windows-{label}.exe")
+          dmg = [p for p in Path("macos").rglob(f"*{version}*.dmg") if p.name.startswith(title)]
+          assert len(dmg) == 1, dmg
+          with dmg[0].open("rb") as file:
+              file.seek(-512, 2)
+              assert file.read(4) == b"koly", "Invalid DMG trailer"
+          architecture = "arm64" if "arm64" in dmg[0].name else "x64"
+          copyfile(dmg[0], out / f"{prefix}-macOS-{architecture}.dmg")
+          with (out / "SHA256SUMS.txt").open("w") as checksum:
+              for file in sorted(out.iterdir()):
+                  if file.suffix == ".txt":
+                      continue
+                  with file.open("rb") as payload:
+                      digest = hashlib.file_digest(payload, "sha256").hexdigest()
+                  checksum.write(f"{digest}  {file.name}\n")
           PY
-          sha256sum installers/*
+          cat installers/SHA256SUMS.txt
       - name: Upload verified files and publish
         run: |
           TAG="v$VERSION"
-          gh api "repos/$GH_REPO/releases/$RELEASE_ID" |
-            jq -e --arg commit "$COMMIT" --arg tag "$TAG" '.target_commitish == $commit and .tag_name == $tag'
           for file in installers/*; do
             name=$(basename "$file")
             digest="sha256:$(sha256sum "$file" | cut -d' ' -f1)"
             size=$(stat -c %s "$file")
+            gh release upload "$TAG" "$file"
             asset=$(gh api "repos/$GH_REPO/releases/$RELEASE_ID/assets" | jq -c --arg name "$name" '.[] | select(.name == $name)')
-            if [ -z "$asset" ]; then
-              gh release upload "$TAG" "$file"
-              asset=$(gh api "repos/$GH_REPO/releases/$RELEASE_ID/assets" | jq -c --arg name "$name" '.[] | select(.name == $name)')
-            fi
             jq -e --arg digest "$digest" --argjson size "$size" '.state == "uploaded" and .size == $size and (.digest == null or .digest == $digest)' <<< "$asset"
           done
           gh release edit "$TAG" --draft=false --latest="$MAKE_LATEST"
