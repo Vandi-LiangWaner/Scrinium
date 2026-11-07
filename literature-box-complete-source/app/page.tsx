@@ -113,6 +113,41 @@ const RichPreview = memo(function RichPreview({html,term="",className="",onOpenC
     if (id !== null) { event.preventDefault(); onOpenCard?.(id); }
   }}/>;
 });
+function LinkedCardFront({ card, onOpenCard, onClose, onFlip }: {
+  card: Card;
+  onOpenCard: (id: number) => void;
+  onClose: () => void;
+  onFlip: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const element = dialog.current;
+    element?.showModal();
+    return () => element?.close();
+  }, []);
+  const kind = card.kind || "paper";
+  const categories = cardCategories(card);
+  return <dialog ref={dialog} className="linked-card-dialog" aria-label={`Front of ${card.title}`} aria-modal="true"
+    onCancel={event => { event.preventDefault(); onClose(); }}
+    onKeyDown={event => event.stopPropagation()}
+    onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
+    <article className={`note-card deck-card ${kind}-card linked-card-face`}>
+      <div className="modal-top">
+        <span className="status-dot">{categories.join(" · ") || `${kind} card`}</span>
+        <button type="button" aria-label="Close card front" onClick={onClose}>×</button>
+      </div>
+      <h2>{card.title}</h2>
+      {kind !== "note" && <>
+        <p className="citation">{[kind === "paper" ? firstAuthor(card.authors) : card.authors, card.year].filter(Boolean).join(" · ")}</p>
+        {card.journal && <p className="journal">{card.journal}</p>}
+      </>}
+      {kind === "journal" && <JournalSummary card={card} term=""/>}
+      <div className="rule"/>
+      <RichPreview className="finding rich-preview" html={kind === "note" ? card.notes : card.findings} onOpenCard={onOpenCard} compact/>
+      <div className="modal-foot"><button type="button" className="done" onClick={onFlip}>Flip to back</button></div>
+    </article>
+  </dialog>;
+}
 function searchExcerpt(text:string,term:string){const needle=term.trim().toLowerCase();const index=text.toLowerCase().indexOf(needle);if(index<0)return text;const start=Math.max(0,index-58),end=Math.min(text.length,index+needle.length+82);return `${start?"…":""}${text.slice(start,end).trim()}${end<text.length?"…":""}`}
 const citationSentences=(value:string)=>value.split(/(?<=[.!?])\s+(?=[A-Z0-9“"'(])/u).map(part=>part.trim()).filter(Boolean);
 const cleanCitationField=(value:string)=>value.replace(/^[\s.,;:()[\]]+|[\s.,;:()[\]]+$/g,"").trim();
@@ -303,6 +338,8 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const [newCategoryName,setNewCategoryName]=useState("");
   const [figurePreview, setFigurePreview] = useState<{ cardId: number; imageId: number } | null>(null);
   const [returnToCard, setReturnToCard] = useState<number | null>(null);
+  const [linkedFront, setLinkedFront] = useState<Card | null>(null);
+  const [linkedBackId, setLinkedBackId] = useState<number | null>(null);
   const [clearingAll,setClearingAll]=useState(false);
   const [clearConfirmation,setClearConfirmation]=useState("");
   const history=useRef<Card[][]>([]);
@@ -456,8 +493,8 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     const meta=cardMetadata.get(c.id)!;
     const categoryMatch = filter === "All cards" || (filter === "Without category" ? !meta.categories.length :
       meta.categories.some(category => categoryFilter(category) === filter));
-    const grouped = kind === "author" || kind === "journal" || (kind === "paper" && groupBy === "status") ? categoryMatch :
-      kind !== "paper" || groupBy === "all" || (groupBy === "project" ?
+    const grouped = kind !== "paper" || groupBy === "status" ? categoryMatch :
+      groupBy === "all" || (groupBy === "project" ?
         (filter === "Without topic" ? !c.projects.length : projectPath.every((level, i) => c.projects[i] === level)) :
         filter === "All cards" || (groupBy === "author" ? meta.authorIds.includes(singleAuthorIdentity(filter)) : meta.keywords.includes(filter)));
     const duplicateMatch=kind!=="paper"||!duplicatesOnly||(duplicateTitleCounts.get(meta.duplicateKey)||0)>1;
@@ -558,6 +595,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     openCardRef.current = origin || null;
     setOpen(origin || null);
     setReturnToCard(null);
+    setLinkedBackId(null);
   }
   function removeOpenCard() {
     if (!open) return;
@@ -573,6 +611,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     openCardRef.current = origin || null;
     setOpen(origin || null);
     setReturnToCard(null);
+    setLinkedBackId(null);
   }
   function restoreOpen(snapshot: Card[]) {
     takeDraft();
@@ -598,10 +637,29 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const openLinkedCard = useCallback((id: number) => {
     const target = cards.find(card => card.id === id);
     if (!target) { alert("This linked card is unavailable."); return; }
+    setLinkedFront(openCardRef.current?.id === id ? openCardRef.current :
+      closingDrafts.current.get(id)?.() || stagedCard(id) || target);
+  }, [cards, stagedCard]);
+  function flipLinkedToBack() {
+    if (!linkedFront) return;
+    const { id } = linkedFront;
     const current = openCardRef.current;
     if (current && current.id !== id) setReturnToCard(origin => origin ?? current.id);
-    openCard(target);
-  }, [cards, openCard]);
+    openCard(linkedFront);
+    setLinkedBackId(id);
+    setLinkedFront(null);
+  }
+  function flipLinkedToFront() {
+    const card = openCardRef.current;
+    if (!card) return;
+    setLinkedFront(card);
+    const field = card.kind === "note" ? "notes" : "findings";
+    const read = pendingRich.current[field];
+    if (read) void afterPaint().then(() => {
+      const latest = { ...card, [field]: read() };
+      setLinkedFront(front => front === card ? latest : front);
+    });
+  }
   function showFigure(cardId: number, imageId: number) {
     if (pendingCard.current) setOpen(pendingCard.current);
     setFigurePreview({ cardId, imageId });
@@ -875,6 +933,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     {open && <div className="modal-backdrop editor-backdrop" onKeyDownCapture={postponeAutosave} onPointerDownCapture={postponeAutosave} onWheelCapture={postponeAutosave} onClick={e=>{if(e.target===e.currentTarget)closeCard()}}><section key={open.id} className={open.kind === "note" ? "card-modal note-modal" : "card-modal"} role="dialog" aria-modal="true" aria-label={open.title}>
       <div className="modal-top"><span className="catalog-label">{open.kind==="project"?"TOPIC":(open.kind||"paper").toUpperCase()} CARD{open.kind !== "note" && <> · {open.year || "UNDATED"}</>}</span><button aria-label="Close card" onClick={closeCard}>×</button></div>
       {(open.kind||"paper")==="paper"&&<CitationImporter onIdentify={fields=>patchOpen(Object.fromEntries(Object.entries(fields).filter(([,value])=>value)),true)}/>}
+      {linkedBackId === open.id && <button type="button" className="linked-flip" onClick={flipLinkedToFront}>Flip to front</button>}
       <DraftInput aria-label="Card title" className="title-input" value={open.title} onCommit={(title, immediate) => patchOpen({ title }, immediate)}/>
       {open.kind!=="project"&&open.kind!=="note"&&<div className="field-row"><label>{(open.kind||"paper")==="paper"?"Authors":(open.kind==="author"?"Affiliation":"Publisher")}<DraftInput value={open.authors} placeholder={(open.kind||"paper")==="paper"?"Lastname, Firstname; or Firstname Lastname":""} onCommit={(authors, immediate) => patchOpen({ authors }, immediate)}/>{(open.kind||"paper")==="paper"&&<small className="field-help">Either name order works. Separate multiple authors with semicolons.</small>}</label><label className="year-field">{open.kind==="author"?"Years":"Year"}<DraftInput value={open.year} onCommit={(year, immediate) => patchOpen({ year }, immediate)}/></label></div>}
       {open.kind!=="project"&&open.kind!=="note"&&<div className="field-row"><label>{(open.kind||"paper")==="paper"?"Journal":open.kind==="author"?"Department / field":"Frequency / location"}<DraftInput value={open.journal} onCommit={(journal, immediate) => patchOpen({ journal }, immediate)}/></label>{(open.kind||"paper")==="paper"&&<label>DOI<div className="doi-field"><DraftInput value={open.doi} onCommit={(doi, immediate) => patchOpen({ doi }, immediate)}/>{open.doi&&<a href={`https://doi.org/${open.doi.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i,"")}`} target="_blank" rel="noreferrer">Open ↗</a>}</div></label>}</div>}
@@ -921,6 +980,8 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     {editingValues&&<div className="modal-backdrop"><section className="status-editor" role="dialog" aria-modal="true"><div className="modal-top"><div><span className="catalog-label">{editingValues==="project"?"TOPIC LEVEL":"KEYWORDS"}</span><h2>Edit {editingValues==="project"?"topics":"keywords"}</h2></div><button aria-label="Close" onClick={()=>setEditingValues(null)}>×</button></div><p>{editingValues==="project"?(projectPath.length?`Manage subtopics under ${projectPath.at(-1)}.`:"Manage top-level topics."):"Rename an item below, or remove it from every card."}</p><div className="status-fields">{valueDraft.map((value,i)=><div key={i}><span>{i+1}</span><input value={value} autoFocus={i===0} placeholder={editingValues==="project"?"Topic name":"Keyword"} onChange={e=>setValueDraft(values=>values.map((item,n)=>n===i?e.target.value:item))}/><button aria-label={`Remove ${value}`} onClick={()=>setValueDraft(values=>values.map((item,n)=>n===i?"":item))}>×</button></div>)}</div>{editingValues==="project"&&projectPath.length<5&&<button className="add-status" onClick={()=>setValueDraft(values=>[...values,""])}>＋ Add topic here</button>}<div className="modal-foot"><button onClick={()=>setEditingValues(null)}>Cancel</button><span>{editingValues==="project"?"Maximum five levels":"Applies to all matching cards"}</span><button className="done" onClick={saveEditedValues}>Save changes</button></div></section></div>}
     {addingCategoryFor!==null&&<div className="modal-backdrop"><section className="status-editor compact-editor" role="dialog" aria-modal="true"><div className="modal-top"><div><span className="catalog-label">CARD CATEGORY</span><h2>Add a category</h2></div><button aria-label="Close" onClick={()=>setAddingCategoryFor(null)}>×</button></div><p>Enter a new name, or type an existing category to assign it.</p><input className="new-category-input" aria-label="Category name" autoFocus value={newCategoryName} list="category-names" onChange={e=>setNewCategoryName(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")saveNewCategory()}}/><datalist id="category-names">{openCategories.map(status=><option key={status} value={status}/>)}</datalist><div className="modal-foot"><button onClick={()=>setAddingCategoryFor(null)}>Cancel</button><button className="done" disabled={!newCategoryName.trim()} onClick={saveNewCategory}>Add & assign</button></div></section></div>}
     {clearingAll&&<div className="modal-backdrop"><section className="status-editor danger-editor" role="dialog" aria-modal="true" aria-labelledby="delete-all-title"><div className="modal-top"><div><span className="catalog-label">DATA MANAGEMENT</span><h2 id="delete-all-title">Delete all cards?</h2></div><button aria-label="Close" onClick={()=>setClearingAll(false)}>×</button></div><p>A JSON backup will be created first. This removes every paper, author, journal, note, and topic card from this device.</p><label className="danger-confirm">Type <b>DELETE ALL</b> to confirm<input autoFocus value={clearConfirmation} onChange={e=>setClearConfirmation(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")void confirmClearAll()}}/></label><div className="modal-foot"><button onClick={()=>setClearingAll(false)}>Cancel</button><span>{cards.length} cards</span><button className="delete-all-confirm" disabled={clearConfirmation!=="DELETE ALL"} onClick={()=>void confirmClearAll()}>Back up & delete all</button></div></section></div>}
+    {linkedFront && <LinkedCardFront card={linkedFront} onOpenCard={openLinkedCard}
+      onClose={() => setLinkedFront(null)} onFlip={flipLinkedToBack}/>}
     {figurePreview && galleryCard?.images?.some(image => image.id === figurePreview.imageId) &&
       <FigureLightbox figures={galleryCard.images} selected={figurePreview.imageId}
         onSelect={imageId => setFigurePreview({ cardId: figurePreview.cardId, imageId })} onClose={() => setFigurePreview(null)}/>}

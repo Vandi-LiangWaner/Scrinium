@@ -18,6 +18,7 @@
   overflow: visible;
 }
 .dividers.value-tabs button {
+  --tab-color: #d4c3a1;
   position: relative;
   flex: 0 0 auto;
   min-width: 0;
@@ -32,7 +33,28 @@
   clip-path: polygon(0 100%, 0 9px, 1px 6px, 4px 2px, 8px 0,
     calc(100% - 19px) 0, calc(100% - 15px) 1px, calc(100% - 11px) 5px, 100% 100%);
 }
-.dividers.value-tabs button.active { min-height: 46px; z-index: 1; }
+.dividers.value-tabs button:nth-child(5n + 2) { --tab-color: #c9b795; }
+.dividers.value-tabs button:nth-child(5n + 3) { --tab-color: #beac88; }
+.dividers.value-tabs button:nth-child(5n + 4) { --tab-color: #b8a37c; }
+.dividers.value-tabs button:nth-child(5n + 5) { --tab-color: #ae9870; }
+.dividers.value-tabs button:not(.active, .edit-statuses, .project-crumb, .previous-topic-level) {
+  background: linear-gradient(var(--tab-color), color-mix(in srgb, var(--tab-color), #624e33 7%));
+}
+.dividers.value-tabs button.active {
+  min-height: 46px;
+  z-index: 1;
+  isolation: isolate;
+  background: #927d5e;
+  border-color: transparent;
+}
+.dividers.value-tabs button.active::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 1.5px 1px 0;
+  background: linear-gradient(#f7efdc, #f0e5ce);
+  clip-path: inherit;
+}
 .dividers.value-tabs button:focus-visible { z-index: 2; outline: 2px solid #78563d; outline-offset: -5px; }
 .value-tabs .project-crumb{background:#806248;color:#fff3df;border-color:#5d432f}
 .level-hint{align-self:center;flex:0 0 auto;padding:0 12px;color:#806f5d;font:10px Arial,sans-serif;text-transform:uppercase;letter-spacing:.08em}.topic-layout{max-width:1500px;margin:0 auto;display:grid;grid-template-columns:280px minmax(0,1fr);align-items:start;gap:20px;padding:0 3vw;overflow:hidden}.topic-layout .deck-area{min-width:0;width:100%;margin:0}.topic-layout .deck-wrap{min-width:0;width:100%}.topic-layout .deck-card,.topic-layout .deck-shadow{width:min(680px,calc(100% - 104px));max-width:100%}.topic-sidebar{position:sticky;z-index:10;top:16px;margin-top:35px;padding:20px;background:#f2e8d5;border:1px solid #b9a78d;box-shadow:2px 5px 12px #4a39251f}.topic-breadcrumb{display:flex;flex-wrap:wrap;gap:4px}.topic-breadcrumb button{border:0;background:transparent;padding:2px;color:#8a6b50;font:10px Arial,sans-serif;cursor:pointer}.topic-breadcrumb button.active{font-weight:bold;color:#4f3828}.topic-sidebar h2{font-size:23px;margin:15px 0 9px}.topic-sidebar p{font-size:13px;line-height:1.6;margin:0;color:#62594e;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:7;overflow:hidden}.topic-sidebar p.expanded{display:block}.intro-toggle,.edit-topic-intro{border:0;background:transparent;color:#8b4d36;font:10px Arial,sans-serif;text-transform:uppercase;cursor:pointer;padding:8px 0}.edit-topic-intro{display:block;margin-top:10px;border-top:1px solid #cbbba2;width:100%;text-align:left;padding-top:12px}@media(max-width:1050px){.topic-layout{display:block;padding:0;overflow:visible}.topic-sidebar{position:static;width:min(92vw,700px);margin:14px auto}.topic-sidebar p{-webkit-line-clamp:4}.topic-layout .deck-card,.topic-layout .deck-shadow{width:min(680px,75vw)}}
