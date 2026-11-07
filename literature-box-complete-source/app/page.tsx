@@ -6,6 +6,7 @@ import { useLibrarySave } from "./library-save";
 import { CardLinkPicker, RichField } from "./rich-field";
 import { inlineCardIds, linkedCardId, remapInlineLinks, safeRichHtml, type LinkableCard } from "./rich-text";
 import { displayName } from "../package.json";
+import { CardDragHandle, CardThumbnails, hasCardSelection, isCardTextInteraction, isSelectingCardText } from "./card-front";
 import { CategoryTabs, emptyCategoryOrder, restoreCategoryOrder, type CategoryOrder } from "./category-tabs";
 
 const collectionLabels = { paper: "Papers", author: "Authors", journal: "Journals", note: "Notes" };
@@ -143,6 +144,7 @@ const RichPreview = memo(function RichPreview({html,term="",className="",onOpenC
   return <div className={className} dangerouslySetInnerHTML={{__html:rendered}} onClick={event => {
     const href = (event.target as HTMLElement).closest("a")?.getAttribute("href");
     if (!href) return;
+    if (hasCardSelection(event.currentTarget)) { event.preventDefault(); event.stopPropagation(); return; }
     event.stopPropagation();
     const id = linkedCardId(href);
     if (id !== null) { event.preventDefault(); onOpenCard?.(id); }
@@ -155,6 +157,8 @@ function LinkedCardFront({ card, onOpenCard, onClose, onFlip }: {
   onFlip: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [figureId, setFigureId] = useState<number | null>(null);
   useEffect(() => {
     const element = dialog.current;
     element?.showModal();
@@ -162,25 +166,39 @@ function LinkedCardFront({ card, onOpenCard, onClose, onFlip }: {
   }, []);
   const kind = card.kind || "paper";
   const categories = cardCategories(card);
+  const figures = card.images || [];
   return <dialog ref={dialog} className="linked-card-dialog" aria-label={`Front of ${card.title}`} aria-modal="true"
-    onCancel={event => { event.preventDefault(); onClose(); }}
+    onCancel={event => { event.preventDefault(); event.stopPropagation(); onClose(); }}
     onKeyDown={event => event.stopPropagation()}
-    onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <article className={`note-card deck-card ${kind}-card linked-card-face`}>
-      <div className="modal-top">
-        <span className="status-dot">{categories.join(" · ") || `${kind} card`}</span>
-        <button type="button" aria-label="Close card front" onClick={onClose}>×</button>
-      </div>
+    onClick={event => { if (event.target === event.currentTarget && !hasCardSelection(event.currentTarget)) onClose(); }}>
+    <div className="linked-card-controls">
+      <button type="button" className="linked-expand" aria-expanded={expanded} aria-controls={`linked-front-${card.id}`}
+        onClick={() => setExpanded(value => !value)}>{expanded ? "Collapse card" : "Expand card"}</button>
+      <button type="button" className="linked-card-close" aria-label="Close card front" onClick={onClose}>Close ×</button>
+    </div>
+    <article id={`linked-front-${card.id}`} className={`note-card deck-card ${kind}-card linked-card-face${expanded ? " preview-expanded" : ""}`}>
+      <div className="card-number">{kind === "project" || kind === "topic" ? "Topic" : collectionLabels[kind as Collection]} card</div>
+      <span className="status-dot">{categories.join(" · ") || (kind === "paper" ? "Uncategorized" : kind)}</span>
       <h2>{card.title}</h2>
       {kind !== "note" && <>
         <p className="citation">{[kind === "paper" ? firstAuthor(card.authors) : card.authors, card.year].filter(Boolean).join(" · ")}</p>
-        {card.journal && <p className="journal">{card.journal}</p>}
+        <p className="journal">{card.journal}{card.doi && <> · <a href={`https://doi.org/${card.doi.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, "")}`} target="_blank" rel="noreferrer">DOI</a></>}</p>
       </>}
       {kind === "journal" && <JournalSummary card={card} term=""/>}
       <div className="rule"/>
-      <RichPreview className="finding rich-preview" html={kind === "note" ? card.notes : card.findings} onOpenCard={onOpenCard} compact/>
-      <div className="modal-foot"><button type="button" className="done" onClick={onFlip}>Flip to back</button></div>
+      <RichPreview className="finding rich-preview" html={kind === "note" ? card.notes : card.findings} onOpenCard={onOpenCard} compact={!expanded}/>
+      {expanded && kind !== "note" && <div className="preview-details">
+        {card.methods && <p><b>Methods:</b> {card.methods}</p>}
+        {card.limitations && <p><b>Limitations:</b> {card.limitations}</p>}
+        {plain(card.notes) && <div className="preview-rich-row"><b>My notes:</b><RichPreview className="rich-preview" html={card.notes} onOpenCard={onOpenCard}/></div>}
+      </div>}
+      <div className="tags">{card.keywords.slice(0, expanded ? 12 : 4).map(tag => <span key={tag}>{tag}</span>)}</div>
+      <CardThumbnails figures={figures} onPreview={setFigureId}/>
+      <footer><span title={card.projects.join(" › ")}>{card.projects.join(" › ") || (kind === "paper" ? "Unfiled" : `${kind} card`)}</span>
+        <button type="button" className="deck-edit" onClick={onFlip}>Flip to back ↗</button></footer>
     </article>
+    {figureId !== null && figures.some(figure => figure.id === figureId) && <FigureLightbox
+      figures={figures} selected={figureId} onSelect={setFigureId} onClose={() => setFigureId(null)}/>}
   </dialog>;
 }
 function searchExcerpt(text:string,term:string){const needle=term.trim().toLowerCase();const index=text.toLowerCase().indexOf(needle);if(index<0)return text;const start=Math.max(0,index-58),end=Math.min(text.length,index+needle.length+82);return `${start?"…":""}${text.slice(start,end).trim()}${end<text.length?"…":""}`}
@@ -561,7 +579,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     return (c.kind||"paper")===kind&&grouped&&duplicateMatch&&(!queryNeedle||meta.search.includes(queryNeedle));
   }).sort((a,b)=>{const left=cardMetadata.get(a.id)!,right=cardMetadata.get(b.id)!;return sort==="project"?left.sortTopic.localeCompare(right.sortTopic)||right.created-left.created:sort==="keyword"?left.sortKeyword.localeCompare(right.sortKeyword)||right.created-left.created:sort==="author"?left.sortAuthor.localeCompare(right.sortAuthor):sort==="title"?left.sortTitle.localeCompare(right.sortTitle):sort==="oldest"?left.created-right.created:right.created-left.created}),[deferredCards,cardMetadata,queryNeedle,filter,sort,kind,groupBy,projectPath,duplicatesOnly,duplicateTitleCounts]);
   const deckItems=useMemo(()=>visible.map(card=>({type:"card" as const,card})),[visible]);
-  useEffect(()=>{const key=(e:KeyboardEvent)=>{const target=e.target as HTMLElement;const editing=target.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName);if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="s"){e.preventDefault();void flushAndSave()}else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="k"){e.preventDefault();searchRef.current?.focus()}else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="n"){e.preventDefault();addCard()}else if(!openCardRef.current&&!editing&&e.key==="ArrowRight")setPosition(p=>Math.min(deckItems.length-1,p+1));else if(!openCardRef.current&&!editing&&e.key==="ArrowLeft")setPosition(p=>Math.max(0,p-1));else if(!editing&&(e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redo():undo()}else if(!editing&&(e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="y"){e.preventDefault();redo()}};window.addEventListener("keydown",key);return()=>window.removeEventListener("keydown",key)},[deckItems.length,kind,flushAndSave]);
+  useEffect(()=>{const key=(e:KeyboardEvent)=>{const target=e.target as HTMLElement;const editing=target.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName);if(e.defaultPrevented||((e.key==="ArrowLeft"||e.key==="ArrowRight")&&isSelectingCardText(e.shiftKey)))return;if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="s"){e.preventDefault();void flushAndSave()}else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="k"){e.preventDefault();searchRef.current?.focus()}else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="n"){e.preventDefault();addCard()}else if(!openCardRef.current&&!editing&&e.key==="ArrowRight")setPosition(p=>Math.min(deckItems.length-1,p+1));else if(!openCardRef.current&&!editing&&e.key==="ArrowLeft")setPosition(p=>Math.max(0,p-1));else if(!editing&&(e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redo():undo()}else if(!editing&&(e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="y"){e.preventDefault();redo()}};window.addEventListener("keydown",key);return()=>window.removeEventListener("keydown",key)},[deckItems.length,kind,flushAndSave]);
   const boundedPosition=Math.min(position,Math.max(deckItems.length-1,0));
   const currentItem=deckItems[boundedPosition];
   const current=currentItem?.type==="card"?currentItem.card:null;
@@ -984,13 +1002,13 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
       {currentItem ? <div className="deck-wrap">
         <button className="flip prev" aria-label="Previous card" disabled={boundedPosition===0} onClick={()=>setPosition(Math.max(0,boundedPosition-1))}>←</button>
         <div className="deck-shadow shadow-three"/><div className="deck-shadow shadow-two"/><div className="deck-shadow shadow-one"/>
-        <article ref={cardPreviewRef} className={`note-card deck-card ${kind}-card ${previewExpanded?"preview-expanded":""}`} key={currentItem.card.id} draggable onDragStart={e=>e.dataTransfer.setData("text/plain",String(currentItem.card.id))} onClick={()=>openCard(currentItem.card)}>
+        <article ref={cardPreviewRef} className={`note-card deck-card ${kind}-card ${previewExpanded?"preview-expanded":""}`} key={currentItem.card.id} onClick={event=>{if(!isCardTextInteraction(event))openCard(currentItem.card)}}>
           <div className="card-number">{String(boundedPosition+1).padStart(2,"0")} / {String(deckItems.length).padStart(2,"0")}</div>{kind==="paper"?<span className={`status-dot ${cardCategories(currentItem.card)[0]?.toLowerCase().replace(" ","-")||"uncategorized"}`}>{cardCategories(currentItem.card).join(" · ")||"Uncategorized"}</span>:<span className="status-dot">{cardCategories(currentItem.card).join(" · ") || kind}</span>}{(duplicateTitleCounts.get(duplicateTitleKey(currentItem.card))||0)>1&&<span className="duplicate-mark" title="Another paper card has the same title">Duplicate title ×{duplicateTitleCounts.get(duplicateTitleKey(currentItem.card))}</span>}
           {(()=>{const current=currentItem.card;const matchedDetails=deferredQuery.trim()?[['Methods',current.methods],['Limitations',current.limitations],['My notes',plain(current.notes)]].filter(([,text])=>text.toLowerCase().includes(deferredQuery.trim().toLowerCase())).map(([label,text])=>[label,searchExcerpt(text,deferredQuery)]):[];return <>
           <h2><HighlightText text={current.title} term={deferredQuery}/></h2>{kind !== "note" && <><p className="citation"><HighlightText text={kind==="paper"?firstAuthor(current.authors):current.authors} term={deferredQuery}/>{current.year&&<> · <HighlightText text={current.year} term={deferredQuery}/></>}</p><p className="journal"><HighlightText text={current.journal} term={deferredQuery}/>{current.doi&&<> · <a href={`https://doi.org/${current.doi.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i,"")}`} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()}>DOI</a></>}</p></>}{kind === "journal" && <JournalSummary card={current} term={deferredQuery}/>}<div className="rule"/>
           <RichPreview className="finding rich-preview" html={kind === "note" ? current.notes : current.findings} term={deferredQuery} onOpenCard={openLinkedCard} compact={!previewExpanded}/>{previewExpanded && kind !== "note" &&<div className="preview-details">{current.methods&&<p><b>Methods:</b> <HighlightText text={current.methods} term={deferredQuery}/></p>}{current.limitations&&<p><b>Limitations:</b> <HighlightText text={current.limitations} term={deferredQuery}/></p>}{plain(current.notes)&&<div className="preview-rich-row"><b>My notes:</b><RichPreview className="rich-preview compact" html={current.notes} term={deferredQuery} onOpenCard={openLinkedCard}/></div>}</div>}{kind !== "note" && !previewExpanded&&matchedDetails.length>0&&<div className="search-matches">{matchedDetails.map(([label,text])=><p key={label}><b>{label}</b><span><HighlightText text={text} term={deferredQuery}/></span></p>)}</div>}<div className="tags">{current.keywords.slice(0,previewExpanded?12:4).map(t=><button key={t} onClick={e=>{e.stopPropagation();searchCards(t)}}><HighlightText text={t} term={deferredQuery}/></button>)}</div>
-          {!!current.images?.length&&<div className="card-thumbs">{current.images.slice(0,3).map((image,i)=><button type="button" key={image.id} aria-label={`Enlarge ${image.name}`} onClick={e=>{e.stopPropagation();showFigure(current.id, image.id)}} style={{transform:`rotate(${i%2?2:-2}deg)`}}><img src={image.data} alt={image.name}/></button>)}{current.images.length>3&&<em>+{current.images.length-3}</em>}</div>}
-          <footer><span title={current.projects.join(" › ")}>{current.projects.join(" › ") || (kind==="paper"?"Unfiled":kind==="author"?"Author card":kind==="note"?"Note card":"Journal card")}</span><b>Click to read & edit ↗</b></footer></>})()}
+          <CardThumbnails figures={current.images || []} onPreview={imageId => showFigure(current.id, imageId)}/>
+          <footer><div className="card-footer-context"><CardDragHandle id={current.id}/><span title={current.projects.join(" › ")}>{current.projects.join(" › ") || (kind==="paper"?"Unfiled":kind==="author"?"Author card":kind==="note"?"Note card":"Journal card")}</span></div><button type="button" className="deck-edit" onClick={event=>{event.stopPropagation();openCard(current)}}>Read &amp; edit ↗</button></footer></>})()}
         </article>
         <button className="flip next" aria-label="Next card" disabled={boundedPosition>=deckItems.length-1} onClick={()=>setPosition(Math.min(deckItems.length-1,boundedPosition+1))}>→</button>
       </div> : <div className="empty"><b>No cards found</b><span>Try another phrase or divider.</span></div>}
@@ -1047,7 +1065,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     {editingValues&&<div className="modal-backdrop"><section className="status-editor" role="dialog" aria-modal="true"><div className="modal-top"><div><span className="catalog-label">{editingValues==="project"?"TOPIC LEVEL":"KEYWORDS"}</span><h2>Edit {editingValues==="project"?"topics":"keywords"}</h2></div><button aria-label="Close" onClick={()=>setEditingValues(null)}>×</button></div><p>{editingValues==="project"?(projectPath.length?`Manage subtopics under ${projectPath.at(-1)}.`:"Manage top-level topics."):"Rename an item below, or remove it from every card."}</p><div className="status-fields">{valueDraft.map((value,i)=><div key={i}><span>{i+1}</span><input value={value} autoFocus={i===0} placeholder={editingValues==="project"?"Topic name":"Keyword"} onChange={e=>setValueDraft(values=>values.map((item,n)=>n===i?e.target.value:item))}/><button aria-label={`Remove ${value}`} onClick={()=>setValueDraft(values=>values.map((item,n)=>n===i?"":item))}>×</button></div>)}</div>{editingValues==="project"&&projectPath.length<5&&<button className="add-status" onClick={()=>setValueDraft(values=>[...values,""])}>＋ Add topic here</button>}<div className="modal-foot"><button onClick={()=>setEditingValues(null)}>Cancel</button><span>{editingValues==="project"?"Maximum five levels":"Applies to all matching cards"}</span><button className="done" onClick={saveEditedValues}>Save changes</button></div></section></div>}
     {addingCategoryFor!==null&&<div className="modal-backdrop"><section className="status-editor compact-editor" role="dialog" aria-modal="true"><div className="modal-top"><div><span className="catalog-label">CARD CATEGORY</span><h2>Add a category</h2></div><button aria-label="Close" onClick={()=>setAddingCategoryFor(null)}>×</button></div><p>Enter a new name, or type an existing category to assign it.</p><input className="new-category-input" aria-label="Category name" autoFocus value={newCategoryName} list="category-names" onChange={e=>setNewCategoryName(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")saveNewCategory()}}/><datalist id="category-names">{openCategories.map(status=><option key={status} value={status}/>)}</datalist><div className="modal-foot"><button onClick={()=>setAddingCategoryFor(null)}>Cancel</button><button className="done" disabled={!newCategoryName.trim()} onClick={saveNewCategory}>Add & assign</button></div></section></div>}
     {clearingAll&&<div className="modal-backdrop"><section className="status-editor danger-editor" role="dialog" aria-modal="true" aria-labelledby="delete-all-title"><div className="modal-top"><div><span className="catalog-label">DATA MANAGEMENT</span><h2 id="delete-all-title">Delete all cards?</h2></div><button aria-label="Close" onClick={()=>setClearingAll(false)}>×</button></div><p>A JSON backup will be created first. This removes every paper, author, journal, note, and topic card from this device.</p><label className="danger-confirm">Type <b>DELETE ALL</b> to confirm<input autoFocus value={clearConfirmation} onChange={e=>setClearConfirmation(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")void confirmClearAll()}}/></label><div className="modal-foot"><button onClick={()=>setClearingAll(false)}>Cancel</button><span>{cards.length} cards</span><button className="delete-all-confirm" disabled={clearConfirmation!=="DELETE ALL"} onClick={()=>void confirmClearAll()}>Back up & delete all</button></div></section></div>}
-    {linkedFront && <LinkedCardFront card={linkedFront} onOpenCard={openLinkedCard}
+    {linkedFront && <LinkedCardFront key={linkedFront.id} card={linkedFront} onOpenCard={openLinkedCard}
       onClose={() => setLinkedFront(null)} onFlip={flipLinkedToBack}/>}
     {figurePreview && galleryCard?.images?.some(image => image.id === figurePreview.imageId) &&
       <FigureLightbox figures={galleryCard.images} selected={figurePreview.imageId}

@@ -1,6 +1,8 @@
-# The Literature Box - built by GPT
+# Scrinium
 
-The Literature Box is a private, local-first desktop app for organizing literature notes as a tactile stack of index cards.
+**Project note:** Scrinium (formerly The Literature Box) is a **vibe coding project**, built iteratively with AI coding assistance.
+
+Scrinium is a private, local-first desktop app for organizing literature notes as a tactile stack of index cards.
 
 It is designed for reading and research without the complexity of a conventional reference manager or “second brain” system. Open the app, browse the stack, flip through cards, search, edit directly, and continue reading.
 
@@ -27,14 +29,14 @@ Download the appropriate installer from the repository’s [Releases](../../rele
 
 1. Download the file whose name contains `Setup` and ends in `.exe`.
 2. Double-click it and complete installation.
-3. Open **The Literature Box** from the Start menu.
+3. Open **Scrinium Classic** or **Scrinium Stacks** from the Start menu.
 
 Windows may show a SmartScreen warning because this independently built app is not code-signed. If you trust this repository, select **More info → Run anyway**.
 
 ### macOS
 
 1. Download the `.dmg` file.
-2. Open it and drag **The Literature Box** into **Applications**.
+2. Open it and drag **Scrinium Classic** or **Scrinium Stacks** into **Applications**.
 3. Control-click the installed app and choose **Open** the first time.
 
 macOS may show a warning because this independently built app is not notarized. If necessary, allow it under **System Settings → Privacy & Security**.
@@ -85,4 +87,4 @@ Build outputs are written to `release/`.
 
 ## Privacy
 
-The Literature Box is intentionally local-first. It has no collaboration, analytics, advertising, social features, or proprietary cloud dependency. Your database stays on your computer unless you choose to copy or back it up elsewhere.
+Scrinium is intentionally local-first. It has no collaboration, analytics, advertising, social features, or proprietary cloud dependency. Your database stays on your computer unless you choose to copy or back it up elsewhere.

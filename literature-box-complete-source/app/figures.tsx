@@ -69,7 +69,7 @@ export function FigureLightbox({ figures, selected, onSelect, onClose }: {
   }, []);
   if (!figure) return null;
   const move = (offset: number) => onSelect(figures[(index + offset + figures.length) % figures.length].id);
-  return <dialog ref={dialog} className="figure-lightbox" aria-label="Figure viewer" onCancel={event => { event.preventDefault(); onClose(); }} onClick={event => {
+  return <dialog ref={dialog} className="figure-lightbox" aria-label="Figure viewer" onCancel={event => { event.preventDefault(); event.stopPropagation(); onClose(); }} onClick={event => {
     if (event.target === event.currentTarget) onClose();
   }} onKeyDown={event => {
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
