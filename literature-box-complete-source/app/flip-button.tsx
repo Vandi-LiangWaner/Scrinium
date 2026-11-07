@@ -3,15 +3,22 @@ import { useCallback, useEffect, useRef, type CSSProperties, type ReactNode } fr
 const FLIP_INTERVAL_MS = 280;
 
 export function useFlipRepeat() {
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const frame = useRef<number | null>(null);
   const stop = useCallback(() => {
-    if (timer.current !== null) clearInterval(timer.current);
-    timer.current = null;
+    if (frame.current !== null) cancelAnimationFrame(frame.current);
+    frame.current = null;
   }, []);
   const start = useCallback((step: () => void) => {
     stop();
+    let nextStep = performance.now() + FLIP_INTERVAL_MS;
+    const advance = (now: number) => {
+      frame.current = requestAnimationFrame(advance);
+      if (now < nextStep) return;
+      nextStep = Math.max(nextStep + FLIP_INTERVAL_MS, now + FLIP_INTERVAL_MS / 2);
+      step();
+    };
+    frame.current = requestAnimationFrame(advance);
     step();
-    timer.current = setInterval(step, FLIP_INTERVAL_MS);
   }, [stop]);
   useEffect(() => {
     window.addEventListener("blur", stop);

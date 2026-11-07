@@ -104,12 +104,14 @@
   --sheet-step: clamp(3.5px, .55vh, 6px);
   --sheet-face: 11px;
   --pile-tilt: 32deg;
+  --card-lean: 11deg;
+  --stack-perspective: 4600px;
   --edge-height: calc(var(--sheet-face) + 17 * var(--sheet-step));
   min-height: 0;
   grid-template-columns: min(680px, 75vw, 100%);
   grid-template-rows: var(--edge-height) auto var(--edge-height);
   justify-content: center;
-  perspective: 950px;
+  perspective: var(--stack-perspective);
   perspective-origin: 50% 46%;
 }
 .stack-compact .deck-shadow { display: none; }
@@ -126,7 +128,7 @@
   display: grid;
   width: 100%;
   min-width: 0;
-  perspective: 950px;
+  perspective: var(--stack-perspective);
   perspective-origin: center bottom;
   z-index: 3;
 }
@@ -135,16 +137,19 @@
   width: 100%;
   min-width: 0;
   z-index: 1;
-  transform: none;
+  transform: rotateX(var(--card-lean));
   transform-origin: center bottom;
   animation: none;
   will-change: auto;
 }
 .stack-hinge [data-stack-layer=covered] { pointer-events: none; z-index: 0; }
 .stack-hinge .deck-card[data-hinge-motion] { z-index: 2; will-change: transform; }
-.stack-hinge .deck-card[data-hinge-motion=fall] { animation: hinge-fall .28s cubic-bezier(.2,.72,.24,1) both; }
-.stack-hinge .deck-card[data-hinge-motion=rise] { animation: hinge-rise .28s cubic-bezier(.2,.72,.24,1) both; }
-.deck-card[data-preview-transition] { animation: none; transform: none; }
+.stack-hinge .deck-card[data-hinge-motion=fall] { animation: hinge-fall .28s linear both; }
+.stack-hinge .deck-card[data-hinge-motion=rise] { animation: hinge-rise .28s linear both; }
+.deck-card[data-expanded-flip=next] { animation: expanded-next .28s linear; }
+.deck-card[data-expanded-flip=previous] { animation: expanded-previous .28s linear; }
+.deck-card[data-preview-transition] { animation: none; transform-origin: center bottom; }
+.deck-card.preview-expanded[data-preview-transition] { transform: none; }
 .card-pile {
   position: relative;
   width: 100%;
@@ -159,8 +164,9 @@
   user-select: none;
 }
 .card-pile:focus-visible { outline: 2px solid #8d694b; outline-offset: 3px; }
-.card-pile-next { grid-area: 1 / 1; align-self: end; z-index: 2; margin-bottom: -2px; transform: rotateX(var(--pile-tilt)); transform-origin: bottom; }
-.card-pile-previous { grid-area: 3 / 1; align-self: start; z-index: 4; margin-top: -5px; width: calc(100% + 12px); transform: rotateX(var(--pile-tilt)); transform-origin: top; }
+/* The rear pile reaches the slightly lowered top of the leaning card. */
+.card-pile-next { grid-area: 1 / 1; align-self: end; z-index: 2; margin-bottom: -18px; transform: rotateX(var(--pile-tilt)); transform-origin: bottom; }
+.card-pile-previous { grid-area: 3 / 1; align-self: start; z-index: 4; margin-top: -5px; transform: rotateX(var(--pile-tilt)); transform-origin: top; }
 .pile-sheets, .pile-sheet { position: absolute; pointer-events: none; }
 .pile-sheets { inset: 0; }
 .pile-sheet {
@@ -177,10 +183,12 @@
 .deck-edit { flex: none; border: 0; background: transparent; color: #874b34; padding: 0; font: inherit; font-weight: bold; text-transform: uppercase; cursor: pointer; }
 .deck-edit:hover { text-decoration: underline; }
 .flip { touch-action: manipulation; }
-@keyframes hinge-fall { from { transform: rotateX(0); } to { transform: rotateX(-89deg); } }
-@keyframes hinge-rise { from { transform: rotateX(-89deg); } to { transform: rotateX(0); } }
+@keyframes hinge-fall { from { transform: rotateX(var(--card-lean)); } to { transform: rotateX(-89deg); } }
+@keyframes hinge-rise { from { transform: rotateX(-89deg); } to { transform: rotateX(var(--card-lean)); } }
+@keyframes expanded-next { from { transform: translateX(34px); } to { transform: translateX(0); } }
+@keyframes expanded-previous { from { transform: translateX(-34px); } to { transform: translateX(0); } }
 @media (prefers-reduced-motion: reduce) {
-  .stack-hinge .deck-card[data-hinge-motion] { animation: none; }
+  .stack-hinge .deck-card[data-hinge-motion], .deck-card[data-expanded-flip] { animation: none; }
   .stack-hinge [data-stack-layer=covered] { display: none; }
 }
 

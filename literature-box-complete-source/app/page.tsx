@@ -308,7 +308,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const [sort, setSort] = useState("project");
   const [hasDraft, setHasDraft] = useState(false);
   type Motion = { card: Card; position: number; direction: "next" | "previous"; previewLines: string };
-  const [navigation, setNavigation] = useState<{ position: number; motion?: Motion }>({ position: 0 });
+  const [navigation, setNavigation] = useState<{ position: number; direction?: Motion["direction"]; motion?: Motion }>({ position: 0 });
   const { start: startKeyFlip, stop: stopKeyFlip } = useFlipRepeat();
   const previewLines = useRef("2");
   const setPosition = useCallback((position: number) => setNavigation({ position }), []);
@@ -319,7 +319,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
       previewBounds.current = cardPreviewRef.current?.getBoundingClientRect() ?? null;
     }
     setPreviewExpanded(value => !value);
-    setNavigation(current => current.motion ? { position: current.position } : current);
+    setNavigation(current => current.direction ? { position: current.position } : current);
   }
   useLayoutEffect(() => {
     const before = previewBounds.current;
@@ -332,10 +332,11 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
       delete card.dataset.previewTransition;
       return;
     }
-    const transform = `translate(${before.left - after.left}px, ${before.top - after.top}px)
-      scale(${before.width / after.width}, ${before.height / after.height})`;
+    const x = before.left + before.width / 2 - (after.left + after.width / 2);
+    const translate = `${x}px ${before.bottom - after.bottom}px`;
+    const scale = `${before.width / after.width} ${before.height / after.height}`;
     const animation = card.animate(
-      [{ transformOrigin: "top left", transform }, { transformOrigin: "top left", transform: "none" }],
+      [{ translate, scale }, { translate: "0px 0px", scale: "1 1" }],
       { duration: 260, easing: "cubic-bezier(.2,.72,.24,1)" },
     );
     const cleanup = () => { delete card.dataset.previewTransition; };
@@ -525,13 +526,14 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
       const next = Math.max(0, Math.min(lastPosition, destination(position)));
       if (next === position) return previous;
       const card = deckItems[position]?.card;
-      return { position: next, motion: animate && card ? {
-        card, position, direction: next > position ? "next" : "previous", previewLines: lines,
+      const direction = next > position ? "next" : "previous";
+      return { position: next, direction, motion: animate && card ? {
+        card, position, direction, previewLines: lines,
       } : undefined };
     });
   }, [deckItems, lastPosition, previewExpanded]);
   const finishFlip = useCallback((motion: Motion) => {
-    setNavigation(current => current.motion === motion ? { position: current.position } : current);
+    startTransition(() => setNavigation(current => current.motion === motion ? { position: current.position } : current));
   }, []);
   const nextCard = useCallback(() => flipTo(position => position + 1), [flipTo]);
   const previousCard = useCallback(() => flipTo(position => position - 1), [flipTo]);
@@ -918,8 +920,9 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     const hinge = motion?.direction === "next" && !active ? "fall" : motion?.direction === "previous" && active ? "rise" : undefined;
     return <article ref={active ? cardPreviewRef : undefined}
       className={`note-card deck-card ${kind}-card ${previewExpanded ? "preview-expanded" : ""}`}
-      key={`${active ? "active" : "covered"}-${card.id}`} data-stack-layer={active ? "active" : "covered"}
+      key={card.id} data-stack-layer={active ? "active" : "covered"}
       data-hinge-motion={hinge} inert={!active} aria-hidden={active ? undefined : true}
+      data-expanded-flip={previewExpanded ? navigation.direction : undefined}
       style={active ? undefined : { "--preview-lines": motion?.previewLines } as CSSProperties}
       onAnimationEnd={hinge && motion ? event => { if (event.target === event.currentTarget) finishFlip(motion); } : undefined}
       draggable={active}
