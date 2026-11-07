@@ -39,14 +39,14 @@
   min-height: 46px;
   z-index: 1;
   isolation: isolate;
-  background: #927d5e;
+  background: #ac9779;
   border-color: transparent;
 }
 .dividers.value-tabs button.active::before {
   content: "";
   position: absolute;
   z-index: -1;
-  inset: 0 1.5px 1px 0;
+  inset: 0;
   background: #f1e7d2;
   clip-path: inherit;
 }

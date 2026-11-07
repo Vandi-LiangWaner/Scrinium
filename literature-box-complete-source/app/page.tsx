@@ -65,6 +65,39 @@ const yearNumber=(value:string)=>Number(value.match(/\b\d{4}\b/)?.[0]||0);
 const createdTime=(card:Card)=>card.createdAt||(card.id>1_000_000_000_000?card.id:0);
 const cardSearchText=(c:Card,categories=cardCategories(c))=>[c.title,c.authors,c.year,c.journal,c.doi,c.keywords.join(" "),c.projects.join(" "),categories.join(" "),plain(c.findings),c.methods,c.limitations,plain(c.notes),c.link,c.quartile,c.impactFactor,c.acceptanceRate,c.medianFirstDecision,...(c.images || []).map(figure => figure.caption)].join(" ").toLowerCase();
 type LibraryState={cards:Card[];statuses:string[];topicOrder:string[];collectionCategories:CollectionCategories};
+function restoreLibrary(raw: unknown, legacyExamples: boolean): LibraryState | null {
+  const stored = (Array.isArray(raw) ? { cards: raw } : raw) as Partial<LibraryState> | null;
+  if (!Array.isArray(stored?.cards)) return null;
+  const cards = stored.cards.map((card, index) => withCategories({
+    ...card,
+    createdAt: card.createdAt || (card.id > 1_000_000_000_000 ? card.id : 1704067200000 + index),
+    kind: card.kind || "paper",
+    keywords: Array.from(new Set([...(card.keywords || []), ...(card.topics || []), ...(card.subtopics || [])])),
+    topics: [], subtopics: [],
+  }, cardCategories(card)));
+  if (legacyExamples) {
+    for (const collection of ["author", "journal"] as const) {
+      if (cards.some(card => card.kind === collection)) continue;
+      const sample = seed.find(card => card.kind === collection)!;
+      cards.push({ ...sample, createdAt: Date.now(), keywords: Array.from(new Set([...sample.keywords, ...sample.topics])), topics: [] });
+    }
+    const existingProjects = new Set(cards.filter(card => card.kind === "project").map(card => card.projects.join(" > ")));
+    const topicNames = new Set(cards.filter(card => card.kind === "paper").map(card => card.projects[0]).filter(Boolean));
+    Array.from(topicNames).forEach((title, index) => {
+      if (!existingProjects.has(title)) cards.push({ ...blank("project"), id: 4000 + index, title, projects: [title] });
+    });
+  }
+  return {
+    cards,
+    statuses: Array.isArray(stored.statuses) ? stored.statuses : defaultStatuses,
+    topicOrder: Array.isArray(stored.topicOrder) ? stored.topicOrder : [],
+    collectionCategories: {
+      author: stored.collectionCategories?.author || [],
+      journal: stored.collectionCategories?.journal || [],
+      note: stored.collectionCategories?.note || [],
+    },
+  };
+}
 type GroupBy="all"|"status"|"keyword"|"project"|"author";
 type CardMeta={search:string;authors:{id:string;label:string}[];authorIds:string[];categories:string[];duplicateKey:string;keywords:string[];sortAuthor:string;sortKeyword:string;sortTitle:string;sortTopic:string;created:number};
 const cardMetaCache=new WeakMap<Card,CardMeta>();
@@ -354,7 +387,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const closingDrafts = useRef(new Map<number, () => Card>());
   const pendingRich = useRef<Partial<Record<"findings" | "notes", () => string>>>({});
   const library = useMemo(() => ({ cards, statuses, topicOrder, collectionCategories }), [cards, statuses, topicOrder, collectionCategories]);
-  const { status: saveStatus, saveNow, stageCard, stagedCard, discardStagedCards, hasUnsaved } = useLibrarySave(library, ready, saveBrowserState);
+  const { status: saveStatus, saveNow, stageCard, stagedCard, discardStagedCards, hasUnsaved, adoptSnapshot, snapshotRevision } = useLibrarySave(library, ready, saveBrowserState);
   const takeDraft = useCallback(() => {
     if (editorCommitTimer.current) clearTimeout(editorCommitTimer.current);
     editorCommitTimer.current = null;
@@ -419,44 +452,24 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const searchCards=useCallback((value:string)=>{setQuery(value);setPosition(0)},[]);
   const selectFilter=useCallback((value:string)=>{setFilter(value);setPosition(0)},[]);
 
+  const applySnapshot = useCallback((snapshot: LibraryState, revision?: number) => {
+    if (revision !== undefined) adoptSnapshot(snapshot, revision);
+    setCards(snapshot.cards);
+    setStatuses(snapshot.statuses);
+    setTopicOrder(snapshot.topicOrder);
+    setCollectionCategories(snapshot.collectionCategories);
+  }, [adoptSnapshot]);
+
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
-        const storedValue = window.literatureBox ? await window.literatureBox.loadCards() : await loadBrowserState();
-        const raw = typeof storedValue === "string" ? JSON.parse(storedValue) : storedValue;
+        const desktop = window.literatureBox;
+        const snapshot = desktop ? await desktop.loadCards() : null;
+        const raw = desktop ? snapshot?.json : await loadBrowserState();
         if (cancelled) return;
-        const savedLibrary = (Array.isArray(raw) ? { cards: raw } : raw) as Partial<LibraryState> | null;
-        if (Array.isArray(savedLibrary?.statuses)) setStatuses(savedLibrary.statuses);
-        if (Array.isArray(savedLibrary?.topicOrder)) setTopicOrder(savedLibrary.topicOrder);
-        if (savedLibrary?.collectionCategories) {
-          setCollectionCategories({
-            author: savedLibrary.collectionCategories.author || [],
-            journal: savedLibrary.collectionCategories.journal || [],
-            note: savedLibrary.collectionCategories.note || [],
-          });
-        }
-        const stored = savedLibrary?.cards;
-        if (stored) {
-          const migrated = stored.map((card, index) => withCategories({
-            ...card,
-            createdAt: card.createdAt || (card.id > 1_000_000_000_000 ? card.id : Date.now() - (stored.length - index) * 1000),
-            kind: card.kind || "paper",
-            keywords: Array.from(new Set([...(card.keywords || []), ...(card.topics || []), ...(card.subtopics || [])])),
-            topics: [], subtopics: [],
-          }, cardCategories(card)));
-          for (const collection of ["author", "journal"] as const) {
-            if (migrated.some(card => card.kind === collection)) continue;
-            const sample = seed.find(card => card.kind === collection)!;
-            migrated.push({ ...sample, createdAt: Date.now(), keywords: Array.from(new Set([...sample.keywords, ...sample.topics])), topics: [] });
-          }
-          const existingProjects = new Set(migrated.filter(card => card.kind === "project").map(card => card.projects.join(" > ")));
-          const topicNames = new Set(migrated.filter(card => card.kind === "paper").map(card => card.projects[0]).filter(Boolean));
-          Array.from(topicNames).forEach((title, index) => {
-            if (!existingProjects.has(title)) migrated.push({ ...blank("project"), id: 4000 + index, title, projects: [title] });
-          });
-          setCards(migrated);
-        }
+        const restored = restoreLibrary(typeof raw === "string" ? JSON.parse(raw) : raw, !desktop);
+        if (restored) applySnapshot(restored, snapshot?.revision);
         setReady(true);
       } catch (error) {
         if (!cancelled) setLoadError(true);
@@ -465,7 +478,50 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     };
     void load();
     return () => { cancelled = true; };
-  }, []);
+  }, [applySnapshot]);
+
+  useEffect(() => {
+    const desktop = window.literatureBox;
+    if (!desktop || !ready) return;
+    let cancelled = false;
+    let loading = false;
+    let lastInput = 0;
+    const recordInput = () => { lastInput = performance.now(); };
+    const canRefresh = () => !cancelled && !document.hidden && !openCardRef.current &&
+      !closingSave.current && !hasUnsaved() && !document.querySelector("[aria-modal=true], .card-pile:active, .flip:active") &&
+      (lastInput === 0 || performance.now() - lastInput > 450);
+    const refresh = async () => {
+      if (loading || !canRefresh()) return;
+      loading = true;
+      const revision = snapshotRevision();
+      try {
+        const snapshot = await desktop.loadCards(revision);
+        if (!snapshot?.json || !canRefresh() || snapshotRevision() !== revision) return;
+        const restored = restoreLibrary(JSON.parse(snapshot.json), false);
+        if (!restored) return;
+        history.current = [];
+        future.current = [];
+        applySnapshot(restored, snapshot.revision);
+      } catch (error) {
+        console.error("Literature Box shared library refresh failed", error);
+      } finally {
+        loading = false;
+      }
+    };
+    const interval = setInterval(() => void refresh(), 2_000);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("pointerdown", recordInput, { passive: true });
+    window.addEventListener("keydown", recordInput);
+    window.addEventListener("wheel", recordInput, { passive: true });
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("pointerdown", recordInput);
+      window.removeEventListener("keydown", recordInput);
+      window.removeEventListener("wheel", recordInput);
+    };
+  }, [ready, applySnapshot, hasUnsaved, snapshotRevision]);
   useEffect(() => () => { if (editorCommitTimer.current) clearTimeout(editorCommitTimer.current); }, []);
   useEffect(() => {
     if (window.literatureBox) return window.literatureBox.onCloseRequested(flushAndSave);
