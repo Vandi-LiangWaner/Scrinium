@@ -131,7 +131,10 @@
   }
 }
 @media (max-width: 700px) {
-  .stack-compact { --card-height: 400px; grid-template-columns: min(82vw, 100%); }
+  .stack-compact { grid-template-columns: min(82vw, 100%); }
+}
+@media (max-width: 620px) {
+  .stack-compact { --card-height: 400px; }
 }
 .stack-hinge {
   grid-area: 2 / 1;
@@ -146,6 +149,7 @@
 .stack-hinge .deck-card {
   grid-area: 1 / 1;
   width: 100%;
+  height: var(--card-height);
   min-width: 0;
   z-index: 1;
   transform: rotateX(var(--card-lean));
