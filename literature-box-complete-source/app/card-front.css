@@ -1,0 +1,20 @@
+.linked-card-dialog { width: min(728px, calc(100% - 24px)); max-width: none; max-height: calc(100% - 24px); margin: auto; padding: 14px 24px 24px; border: 0; background: transparent; color: var(--ink); }
+.linked-card-dialog::backdrop { background: #2e241c99; }
+.linked-card-dialog .linked-card-face { width: 100%; max-width: 100%; height: 430px; min-height: 0; margin: 0; cursor: default; animation: none; transform: none; will-change: auto; }
+
+/* Front text stays selectable; dragging is confined to its handle. */
+.deck-card { user-select: text; cursor: default; }
+.deck-card :is(h2, p, .finding, .status-dot, .card-number, .journal-summary, footer span) { user-select: text; cursor: text; }
+.card-footer-context { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 65%; }
+.deck-card footer .card-footer-context > span { min-width: 0; max-width: none; }
+.card-drag-handle { flex: none; width: 24px; height: 24px; border: 0; padding: 0; background: transparent; color: #8c775c; font: 18px var(--scrinium-font); cursor: grab; user-select: none; }
+.card-drag-handle:active { cursor: grabbing; }
+.deck-edit { flex: none; border: 0; background: transparent; color: #874b34; padding: 0; font: inherit; font-weight: bold; text-transform: uppercase; cursor: pointer; }
+.linked-card-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.linked-card-controls button { border: 1px solid #b7a58b; border-radius: 3px; background: #f5eddd; padding: 7px 11px; color: #6f4a34; font: 12px var(--scrinium-font); cursor: pointer; }
+.linked-card-close { margin-left: auto; }
+.linked-card-dialog .linked-card-face.preview-expanded { height: min(720px, calc(100vh - 150px)); min-height: 430px; }
+.linked-card-dialog .linked-card-face:hover { transform: none; }
+@media (max-width: 620px) { .linked-card-dialog { padding: 10px; } .linked-card-dialog .linked-card-face { height: 400px; padding-left: 24px; } .linked-card-face footer { left: 24px; right: 24px; } }
+
+.card-thumbs > em { position: absolute; right: -7px; bottom: -6px; }
