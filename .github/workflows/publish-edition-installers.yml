@@ -1,4 +1,4 @@
-name: Publish verified Classic and Stacks installers
+name: Stage verified Scrinium installers for preview
 on:
   push:
     branches: [codex/index-installer-transfer]
@@ -14,17 +14,15 @@ jobs:
       matrix:
         include:
           - edition: Classic
-            version: 3.2.5
-            run: 42363988150
-            commit: 33ae826e270b2c95290af262e5f3aaf67976312f
-            release: 437505255
-            latest: "false"
+            version: 3.2.6
+            run: 42368917559
+            commit: feb8486b98886ae1728aa7f1bb68d2cf4cb04184
+            release: 437537702
           - edition: Stacks
-            version: 3.3.7
-            run: 42364572259
-            commit: 6088307953392a2928ac7023f5c15a0a45e734d5
-            release: 437505265
-            latest: "true"
+            version: 3.3.8
+            run: 42368929488
+            commit: 372fe6087544b8b322d0253aa79bb45d9f9ee2b5
+            release: 437537709
     env:
       GH_REPO: ${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
@@ -33,7 +31,6 @@ jobs:
       COMMIT: ${{ matrix.commit }}
       BUILD_RUN: ${{ matrix.run }}
       RELEASE_ID: ${{ matrix.release }}
-      MAKE_LATEST: ${{ matrix.latest }}
     steps:
       - name: Verify exact successful build and draft
         run: |
@@ -94,7 +91,7 @@ jobs:
                   checksum.write(f"{digest}  {file.name}\n")
           PY
           cat installers/SHA256SUMS.txt
-      - name: Upload verified files and publish
+      - name: Upload verified files and keep draft
         run: |
           TAG="v$VERSION"
           for file in installers/*; do
@@ -105,7 +102,6 @@ jobs:
             asset=$(gh api "repos/$GH_REPO/releases/$RELEASE_ID/assets" | jq -c --arg name "$name" '.[] | select(.name == $name)')
             jq -e --arg digest "$digest" --argjson size "$size" '.state == "uploaded" and .size == $size and (.digest == null or .digest == $digest)' <<< "$asset"
           done
-          gh release edit "$TAG" --draft=false --latest="$MAKE_LATEST"
-          test "$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq .object.sha)" = "$COMMIT"
+          gh api "repos/$GH_REPO/releases/$RELEASE_ID" | jq -e ' .draft == true '
           gh release view "$TAG" --json url,isDraft,assets
 
