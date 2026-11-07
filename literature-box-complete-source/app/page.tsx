@@ -9,10 +9,9 @@ import { displayName } from "../package.json";
 
 const collectionLabels = { paper: "Papers", author: "Authors", journal: "Journals", note: "Notes" };
 type Collection = keyof typeof collectionLabels;
-type CategoryCollection = Exclude<Collection, "note">;
-type CollectionCategories = Record<"author" | "journal", string[]>;
-const isCategoryCollection = (kind: Card["kind"]): kind is CategoryCollection =>
-  kind === "paper" || kind === "author" || kind === "journal";
+type CollectionCategories = Record<Exclude<Collection, "paper">, string[]>;
+const isCategoryCollection = (kind: Card["kind"]): kind is Collection =>
+  kind === "paper" || kind === "author" || kind === "journal" || kind === "note";
 const categoryFilter = (name: string) => `category:${name.toLowerCase()}`;
 
 export type Card = {
@@ -294,9 +293,9 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const [projectPath,setProjectPath]=useState<string[]>([]);
   const [introExpanded,setIntroExpanded]=useState(false);
   const [statuses,setStatuses]=useState(defaultStatuses);
-  const [collectionCategories, setCollectionCategories] = useState<CollectionCategories>({ author: [], journal: [] });
+  const [collectionCategories, setCollectionCategories] = useState<CollectionCategories>({ author: [], journal: [], note: [] });
   const [topicOrder,setTopicOrder]=useState<string[]>([]);
-  const [editingStatuses,setEditingStatuses]=useState<CategoryCollection | null>(null);
+  const [editingStatuses,setEditingStatuses]=useState<Collection | null>(null);
   const [statusDraft,setStatusDraft]=useState(defaultStatuses);
   const [editingValues,setEditingValues]=useState<"keyword"|"project"|null>(null);
   const [valueDraft,setValueDraft]=useState<string[]>([]);
@@ -394,7 +393,11 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
         if (Array.isArray(savedLibrary?.statuses)) setStatuses(savedLibrary.statuses);
         if (Array.isArray(savedLibrary?.topicOrder)) setTopicOrder(savedLibrary.topicOrder);
         if (savedLibrary?.collectionCategories) {
-          setCollectionCategories({ author: savedLibrary.collectionCategories.author || [], journal: savedLibrary.collectionCategories.journal || [] });
+          setCollectionCategories({
+            author: savedLibrary.collectionCategories.author || [],
+            journal: savedLibrary.collectionCategories.journal || [],
+            note: savedLibrary.collectionCategories.note || [],
+          });
         }
         const stored = savedLibrary?.cards;
         if (stored) {
@@ -474,11 +477,17 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const allAuthors=useMemo(()=>kind==="paper"?canonicalAuthors(kindCards):[],[kind,kindCards]);
   const categoryLists = useMemo(() => {
     const unique = (values: string[]) => Array.from(new Map(values.map(name => [name.toLowerCase(), name])).values());
-    const lists = { paper: statuses, author: [...collectionCategories.author], journal: [...collectionCategories.journal] };
+    const lists = {
+      author: [...collectionCategories.author],
+      journal: [...collectionCategories.journal],
+      note: [...collectionCategories.note],
+    };
     deferredCards.forEach(card => {
-      if (card.kind === "author" || card.kind === "journal") lists[card.kind].push(...cardCategories(card));
+      if (card.kind === "author" || card.kind === "journal" || card.kind === "note") {
+        lists[card.kind].push(...cardCategories(card));
+      }
     });
-    return { ...lists, author: unique(lists.author), journal: unique(lists.journal) };
+    return { paper: statuses, author: unique(lists.author), journal: unique(lists.journal), note: unique(lists.note) };
   }, [statuses, collectionCategories, deferredCards]);
   const openCollection = open?.kind || "paper";
   const openCategories = open && isCategoryCollection(openCollection) ? categoryLists[openCollection] : [];
@@ -618,11 +627,11 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   }
   function selectProjectLevel(level:string){const path=[...projectPath,level].slice(0,5);setProjectPath(path);setPosition(0);setIntroExpanded(false);if(!cards.some(c=>c.kind==="project"&&c.projects.join(" > ")===path.join(" > "))){const project={...blank("project"),id:Date.now(),title:level,projects:path};change(cs=>[project,...cs])}}
   function selectProjectPath(path:string[]){const next=path.slice(0,5);setProjectPath(next);selectFilter("All cards");setIntroExpanded(false);if(next.length&&!cards.some(c=>c.kind==="project"&&c.projects.join(" > ")===next.join(" > "))){const project={...blank("project"),id:Date.now(),title:next.at(-1)||"Topic",projects:next};change(cs=>[project,...cs])}}
-  function editCategories(collection: CategoryCollection) {
+  function editCategories(collection: Collection) {
     setStatusDraft(categoryLists[collection]);
     setEditingStatuses(collection);
   }
-  function storeCategories(collection: CategoryCollection, values: string[]) {
+  function storeCategories(collection: Collection, values: string[]) {
     if (collection === "paper") setStatuses(values);
     else setCollectionCategories(current => ({ ...current, [collection]: values }));
   }
@@ -790,10 +799,13 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
         })), ...current];
       });
       if (Array.isArray(data.statuses)) setStatuses(current => Array.from(new Set([...current, ...data.statuses])));
-      if (data.collectionCategories) setCollectionCategories(current => ({
-        author: Array.from(new Set([...current.author, ...(Array.isArray(data.collectionCategories.author) ? data.collectionCategories.author.filter((name: unknown) => typeof name === "string") : [])])),
-        journal: Array.from(new Set([...current.journal, ...(Array.isArray(data.collectionCategories.journal) ? data.collectionCategories.journal.filter((name: unknown) => typeof name === "string") : [])])),
-      }));
+      if (data.collectionCategories) setCollectionCategories(current => {
+        const merge = (collection: keyof CollectionCategories) => {
+          const names = data.collectionCategories[collection];
+          return Array.from(new Set([...current[collection], ...(Array.isArray(names) ? names.filter((name: unknown) => typeof name === "string") : [])]));
+        };
+        return { author: merge("author"), journal: merge("journal"), note: merge("note") };
+      });
       if (Array.isArray(data.topicOrder)) setTopicOrder(current => Array.from(new Set([...current, ...data.topicOrder])));
     } catch {
       alert("That file is not a valid Literature Box JSON backup.");
@@ -825,7 +837,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     {kind==="paper"&&<nav className="dividers organizer-tabs" aria-label="Choose organization">
       {([['all','All cards'],['project','Topics'],['status','Categories'],['keyword','Keywords'],['author','Authors']] as const).map(([value,label])=><button key={value} className={groupBy===value?"active":""} onClick={()=>{setGroupBy(value);selectFilter("All cards");setProjectPath([]);setIntroExpanded(false)}}><span>{label}</span>{value==="all"&&<em>{visible.length}</em>}</button>)}
     </nav>}
-    {isCategoryCollection(kind) && (kind !== "paper" || groupBy === "status") && <nav className="dividers value-tabs" aria-label="Card categories">
+    {(kind !== "paper" || groupBy === "status") && <nav className="dividers value-tabs" aria-label="Card categories">
       {kind !== "paper" && <button className={filter === "All cards" ? "active" : ""} onClick={() => selectFilter("All cards")}><span>All cards</span><em>{matchingKindCards.length}</em></button>}
       <button className={filter==="Without category"?"active":""} onClick={()=>selectFilter("Without category")}><span>Without category</span><em>{facetCounts.statusesMap.get("")||0}</em></button>
       {categoryLists[kind].map(category => <button key={category} className={filter === categoryFilter(category) ? "active" : ""}
