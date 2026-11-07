@@ -111,14 +111,16 @@
 .save-state.error { display: inline; color: #923f2e; }
 .save-state button { margin-left: 6px; }
 
-.stack-compact {
-  --sheet-step: clamp(3.5px, .55vh, 6px);
-  --sheet-face: 11px;
-  --pile-tilt: 32deg;
-  --card-lean: 11deg;
+.deck-wrap {
+  --sheet-step: clamp(7px, 1vh, 9px);
+  --sheet-face: 9px;
+  --pile-tilt: 68deg;
+  --card-lean: 24deg;
   --card-height: 430px;
   --stack-perspective: 4600px;
-  --edge-height: calc(var(--sheet-face) + 17 * var(--sheet-step));
+  --edge-height: calc((var(--sheet-face) + 17 * var(--sheet-step)) * cos(var(--pile-tilt)));
+}
+.stack-compact {
   min-height: 0;
   grid-template-columns: min(680px, 75vw, 100%);
   grid-template-rows: var(--edge-height) auto var(--edge-height);
@@ -139,6 +141,8 @@
 .stack-hinge {
   grid-area: 2 / 1;
   display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   width: 100%;
   height: var(--card-height);
   min-width: 0;
@@ -148,6 +152,7 @@
 }
 .stack-hinge .deck-card {
   grid-area: 1 / 1;
+  align-self: end;
   width: 100%;
   height: var(--card-height);
   min-width: 0;
@@ -157,6 +162,7 @@
   animation: none;
   transition: box-shadow .18s ease;
   will-change: auto;
+  overflow: clip;
 }
 .stack-hinge [data-stack-layer=covered] { pointer-events: none; z-index: 0; }
 .stack-hinge .deck-card[data-hinge-motion] { z-index: 2; will-change: transform; }
@@ -164,6 +170,24 @@
 .stack-hinge .deck-card[data-hinge-motion=rise] { animation: hinge-rise .28s linear both; }
 .deck-card[data-preview-transition] { animation: none; transform-origin: center bottom; }
 .deck-card.preview-expanded[data-preview-transition] { transform: none; }
+.stack-expanded {
+  grid-area: 1 / 1;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  place-items: center;
+  width: 100%;
+  perspective: var(--stack-perspective);
+  perspective-origin: center bottom;
+  z-index: 3;
+}
+.stack-expanded .deck-card { align-self: end; transition: box-shadow .18s ease; }
+.stack-expanded .deck-card:hover { transform: none; }
+.stack-expanded .deck-card[data-preview-settled] { animation: none; }
+.deck-wrap > .flip[hidden] { display: none; }
+.deck-wrap:not(.stack-compact) .card-pile { position: absolute; opacity: 0; visibility: hidden; pointer-events: none; }
+.deck-wrap:has([data-preview-transition]) .card-pile { pointer-events: none; }
+.stack-compact .card-pile { transition-delay: .14s; }
 .card-pile {
   position: relative;
   width: 100%;
@@ -176,6 +200,7 @@
   cursor: pointer;
   touch-action: manipulation;
   user-select: none;
+  transition: opacity .14s ease, visibility .14s;
 }
 .card-pile:focus-visible { outline: 2px solid #8d694b; outline-offset: 3px; }
 /* Project both piles from the card's hinge. The rear pile starts at the leaned top edge. */
@@ -217,6 +242,7 @@
 @media (prefers-reduced-motion: reduce) {
   .stack-hinge .deck-card[data-hinge-motion] { animation: none; }
   .stack-hinge [data-stack-layer=covered] { display: none; }
+  .card-pile { transition: none; }
 }
 
 .deck-card{animation:deal-smooth .28s cubic-bezier(.2,.72,.24,1);will-change:transform,opacity;backface-visibility:hidden}.deck-shadow{transition:transform .28s cubic-bezier(.2,.72,.24,1),box-shadow .28s ease}@keyframes deal-smooth{0%{opacity:.15;transform:translate3d(34px,5px,0) rotate(.7deg) scale(.992)}100%{opacity:1;transform:translate3d(0,0,0) rotate(0) scale(1)}}@media(prefers-reduced-motion:reduce){.deck-card{animation:none}.deck-shadow{transition:none}}

@@ -374,14 +374,22 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const [open, setOpen] = useState<Card | null>(null);
   const [sort, setSort] = useState("project");
   const [hasDraft, setHasDraft] = useState(false);
-  type Motion = { card: Card; position: number; direction: "next" | "previous"; duration: number };
+  type Motion = { id: number; card: Card; position: number; direction: "next" | "previous"; duration: number };
   const [navigation, setNavigation] = useState<{ position: number; motion?: Motion }>({ position: 0 });
+  const motionSequence = useRef(0);
   const setPosition = useCallback((position: number) => setNavigation({ position }), []);
   const [previewExpanded,setPreviewExpanded]=useState(false);
-  const previewBounds = useRef<DOMRect | null>(null);
+  const previewBounds = useRef<{ rect: DOMRect; width: number; height: number; transform: string } | null>(null);
   function togglePreview() {
-    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      previewBounds.current = cardPreviewRef.current?.getBoundingClientRect() ?? null;
+    const card = cardPreviewRef.current;
+    if (card && previewExpanded) card.scrollTop = 0;
+    if (card && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      previewBounds.current = {
+        rect: card.getBoundingClientRect(), width: card.offsetWidth, height: card.offsetHeight,
+        transform: getComputedStyle(card).transform,
+      };
+      card.dataset.previewSettled = "";
+      card.dataset.previewTransition = "";
     }
     setPreviewExpanded(value => !value);
     setNavigation(current => current.motion ? { position: current.position } : current);
@@ -390,24 +398,32 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
     const before = previewBounds.current;
     const card = cardPreviewRef.current;
     previewBounds.current = null;
-    if (!before || !card) return;
+    const stage = card?.parentElement;
+    if (!before || !card || !stage) return;
     card.dataset.previewTransition = "";
     const after = card.getBoundingClientRect();
     if (!after.width || !after.height) {
       delete card.dataset.previewTransition;
       return;
     }
-    const x = before.left + before.width / 2 - (after.left + after.width / 2);
-    const translate = `${x}px ${before.bottom - after.bottom}px`;
-    const scale = `${before.width / after.width} ${before.height / after.height}`;
-    const animation = card.animate(
-      [{ translate, scale }, { translate: "0px 0px", scale: "1 1" }],
-      { duration: 260, easing: "cubic-bezier(.2,.72,.24,1)" },
-    );
-    const cleanup = () => { delete card.dataset.previewTransition; };
-    animation.onfinish = cleanup;
-    return () => { animation.cancel(); cleanup(); };
-  }, [previewExpanded]);
+    const x = before.rect.left + before.rect.width / 2 - (after.left + after.width / 2);
+    const y = before.rect.bottom - after.bottom;
+    const end = { width: `${card.offsetWidth}px`, height: `${card.offsetHeight}px`, transform: getComputedStyle(card).transform };
+    stage.style.height = `${stage.offsetHeight}px`;
+    const options = { duration: 280, easing: "cubic-bezier(.2,.72,.24,1)" };
+    const size = card.animate([
+      { width: `${before.width}px`, height: `${before.height}px`, transform: before.transform }, end,
+    ], options);
+    const position = stage.animate([
+      { transform: `translate(${x}px, ${y}px)` }, { transform: "translate(0px, 0px)" },
+    ], options);
+    const cleanup = () => {
+      stage.style.removeProperty("height");
+      delete card.dataset.previewTransition;
+    };
+    size.onfinish = cleanup;
+    return () => { size.cancel(); position.cancel(); cleanup(); };
+  }, [previewExpanded, navigation.position]);
   const [duplicatesOnly,setDuplicatesOnly]=useState(false);
   const [kind, setKind] = useState<Collection>("paper");
   const [groupBy,setGroupBy]=useState<GroupBy>(initialGroupBy);
@@ -614,6 +630,7 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
   const boundedPosition = Math.min(navigation.position, lastPosition);
   const flipTo = useCallback((destination: (position: number) => number, duration = 280) => {
     const animate = !previewExpanded && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const id = ++motionSequence.current;
     setNavigation(previous => {
       const position = Math.min(previous.position, lastPosition);
       const next = Math.max(0, Math.min(lastPosition, destination(position)));
@@ -621,12 +638,12 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
       const card = deckItems[position]?.card;
       const direction = next > position ? "next" : "previous";
       return { position: next, motion: animate && card ? {
-        card, position, direction, duration,
+        id, card, position, direction, duration,
       } : undefined };
     });
   }, [deckItems, lastPosition, previewExpanded]);
   const finishFlip = useCallback((motion: Motion) => {
-    startTransition(() => setNavigation(current => current.motion === motion ? { position: current.position } : current));
+    startTransition(() => setNavigation(current => current.motion?.id === motion.id ? { position: current.position } : current));
   }, []);
   const nextCard = useCallback((duration?: number) => flipTo(position => position + 1, duration), [flipTo]);
   const previousCard = useCallback((duration?: number) => flipTo(position => position - 1, duration), [flipTo]);
@@ -675,7 +692,8 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
       const lineHeight = parseFloat(getComputedStyle(finding).lineHeight) || 24;
       const reserve = matches ? Math.min(62, matches.scrollHeight + 10)
         : tags?.children.length ? Math.min(62, tags.scrollHeight + 22) : 8;
-      const available = footer.offsetTop - finding.offsetTop - reserve;
+      const height = parseFloat(getComputedStyle(card).getPropertyValue("--card-height")) || card.offsetHeight;
+      const available = footer.offsetTop + height - card.offsetHeight - finding.offsetTop - reserve;
       const lines = String(Math.max(1, Math.min(8, Math.floor(available / lineHeight))));
       card.style.setProperty("--preview-lines", lines);
     };
@@ -1117,16 +1135,15 @@ export default function Home({initialCards,initialGroupBy="all"}:{initialCards?:
         <span>{previewExpanded ? "Hold ← or → to flip" : "Hold either pile or ← → to flip"}</span>
       </div>
       {currentItem ? <div className={previewExpanded ? "deck-wrap" : "deck-wrap stack-compact"}>
-        {previewExpanded ? <FlipButton className="flip prev" label="Previous card" disabled={boundedPosition === 0} onFlip={previousCard}>←</FlipButton>
-          : deckItems[boundedPosition + 1] && <CardPile card={deckItems[boundedPosition + 1].card} count={lastPosition - boundedPosition} direction="next" onFlip={nextCard}/>}
+        <FlipButton className="flip prev" label="Previous card" hidden={!previewExpanded} disabled={boundedPosition === 0} onFlip={previousCard}>←</FlipButton>
+        {deckItems[boundedPosition + 1] && <CardPile card={deckItems[boundedPosition + 1].card} count={lastPosition - boundedPosition} direction="next" onFlip={nextCard}/>}
         <div className="deck-shadow shadow-three"/><div className="deck-shadow shadow-two"/><div className="deck-shadow shadow-one"/>
-        {previewExpanded ? renderDeckCard(currentItem.card, boundedPosition, true) :
-          <div className="stack-hinge">
-            {navigation.motion && renderDeckCard(navigation.motion.card, navigation.motion.position, false, navigation.motion)}
-            {renderDeckCard(currentItem.card, boundedPosition, true, navigation.motion)}
-          </div>}
-        {previewExpanded ? <FlipButton className="flip next" label="Next card" disabled={boundedPosition >= lastPosition} onFlip={nextCard}>→</FlipButton>
-          : deckItems[boundedPosition - 1] && <CardPile card={deckItems[boundedPosition - 1].card} count={boundedPosition} direction="previous" onFlip={previousCard}/>}
+        <div className={previewExpanded ? "stack-expanded" : "stack-hinge"} key="card-stage">
+          {!previewExpanded && navigation.motion && renderDeckCard(navigation.motion.card, navigation.motion.position, false, navigation.motion)}
+          {renderDeckCard(currentItem.card, boundedPosition, true, navigation.motion)}
+        </div>
+        <FlipButton className="flip next" label="Next card" hidden={!previewExpanded} disabled={boundedPosition >= lastPosition} onFlip={nextCard}>→</FlipButton>
+        {deckItems[boundedPosition - 1] && <CardPile card={deckItems[boundedPosition - 1].card} count={boundedPosition} direction="previous" onFlip={previousCard}/>}
       </div> : <div className="empty"><b>No cards found</b><span>Try another phrase or divider.</span></div>}
       <div className="deck-dots">{deckItems.slice(Math.max(0,boundedPosition-3),boundedPosition+4).map((item,index)=>{const itemPosition=Math.max(0,boundedPosition-3)+index;return <button key={item.card.id} className={itemPosition===boundedPosition?"active":""} onClick={() => flipTo(() => itemPosition)} aria-label={`Go to card ${itemPosition + 1}`} aria-current={itemPosition === boundedPosition ? "true" : undefined}/>})}</div>
     </section></div>

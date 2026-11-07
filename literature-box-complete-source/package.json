@@ -1,6 +1,6 @@
 {
   "name": "literature-box-stacks",
-  "version": "3.3.5",
+  "version": "3.3.6",
   "private": true,
   "main": "desktop/main.cjs",
   "engines": {

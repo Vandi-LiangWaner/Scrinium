@@ -30,10 +30,11 @@ function useFlipRepeat() {
   return { start, stop };
 }
 
-export function FlipButton({ label, className, disabled, onFlip, children, style }: {
+export function FlipButton({ label, className, disabled, hidden, onFlip, children, style }: {
   label: string;
   className: string;
   disabled?: boolean;
+  hidden?: boolean;
   onFlip: (duration?: number) => void;
   children: ReactNode;
   style?: CSSProperties;
@@ -43,10 +44,10 @@ export function FlipButton({ label, className, disabled, onFlip, children, style
   useEffect(() => { onFlipRef.current = onFlip; }, [onFlip]);
 
   useEffect(() => {
-    if (disabled) stop();
-  }, [disabled, stop]);
+    if (disabled || hidden) stop();
+  }, [disabled, hidden, stop]);
 
-  return <button type="button" aria-label={label} className={className} disabled={disabled} style={style}
+  return <button type="button" aria-label={label} className={className} disabled={disabled} hidden={hidden} style={style}
     onPointerDown={event => {
       if (event.button !== 0 || !event.isPrimary) return;
       event.currentTarget.setPointerCapture(event.pointerId);
