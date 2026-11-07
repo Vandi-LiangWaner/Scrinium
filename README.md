@@ -1,5 +1,7 @@
 # The Literature Box - built by GPT
 
+**Project note:** Scrinium (formerly The Literature Box) is a **vibe coding project**, built iteratively with AI coding assistance.
+
 The Literature Box is a private, local-first desktop app for organizing literature notes as a tactile stack of index cards.
 
 It is designed for reading and research without the complexity of a conventional reference manager or “second brain” system. Open the app, browse the stack, flip through cards, search, edit directly, and continue reading.
